@@ -1,9 +1,18 @@
 import type { ReadStatus } from "../data/mockThreads";
 
-const DEFAULT_API_BASE_URL = "http://localhost:3000/api";
+declare const __DEV__: boolean;
+
+const LOCAL_API_BASE_URL = "http://localhost:3000/api";
+const configuredApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+
+if (!configuredApiBaseUrl && !__DEV__) {
+  throw new Error(
+    "EXPO_PUBLIC_API_BASE_URL is required for ReadNest release builds.",
+  );
+}
 
 export const API_BASE_URL = (
-  process.env.EXPO_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL
+  configuredApiBaseUrl || LOCAL_API_BASE_URL
 ).replace(/\/+$/, "");
 
 export type ApiUser = {

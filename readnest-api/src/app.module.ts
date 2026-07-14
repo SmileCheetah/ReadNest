@@ -40,7 +40,11 @@ import { SummaryModule } from './summary/summary.module';
 
         return {
           connection: {
-            host: configService.get<string>('REDIS_HOST') ?? 'localhost',
+            host:
+              configService.get<string>('REDIS_HOST') ??
+              (configService.get<string>('NODE_ENV') === 'production'
+                ? undefined
+                : 'localhost'),
             port: Number(configService.get<string>('REDIS_PORT') ?? 6379),
             username: configService.get<string>('REDIS_USERNAME') || undefined,
             password: configService.get<string>('REDIS_PASSWORD') || undefined,
