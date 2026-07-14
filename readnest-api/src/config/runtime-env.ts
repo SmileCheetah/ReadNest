@@ -37,17 +37,17 @@ function isLocalHostname(hostname: string | null) {
 function buildDatabaseUrlFromParts() {
   const { DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD } = process.env;
 
-  if (![DB_HOST, DB_NAME, DB_USER, DB_PASSWORD].every(hasValue)) {
+  if (![DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD].every(hasValue)) {
     return null;
   }
 
   const user = encodeURIComponent(DB_USER as string);
   const password = encodeURIComponent(DB_PASSWORD as string);
   const host = DB_HOST as string;
-  const port = hasValue(DB_PORT) ? `:${DB_PORT}` : '';
+  const port = DB_PORT as string;
   const database = encodeURIComponent(DB_NAME as string);
 
-  return `mysql://${user}:${password}@${host}${port}/${database}`;
+  return `mysql://${user}:${password}@${host}:${port}/${database}`;
 }
 
 function validateNodeEnv(check: RuntimeEnvCheck) {
@@ -82,7 +82,7 @@ function validateDatabase(check: RuntimeEnvCheck) {
       );
     } else {
       check.missing.push(
-        'DATABASE_URL or DB_HOST, DB_NAME, DB_USER, DB_PASSWORD',
+        'DATABASE_URL or DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD',
       );
       return;
     }

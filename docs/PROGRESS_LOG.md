@@ -1676,6 +1676,49 @@ Jest 테스트 통과
 React Native TypeScript 검사 통과
 ```
 
+### KoDeploy DB 환경변수 자동 조합 보강
+
+KoDeploy MySQL 의존성이 `DATABASE_URL` 대신 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`를 제공하는 상황에 맞춰 Prisma 연결 흐름을 보강했습니다.
+
+구현 내용:
+
+- 앱 시작 시 `DATABASE_URL`이 있으면 그대로 우선 사용합니다.
+- `DATABASE_URL`이 없으면 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` 5개 값을 조합해 `DATABASE_URL`을 생성합니다.
+- 둘 다 없으면 시작 시 명확한 오류를 출력합니다.
+- production에서 생성된 DB URL이 localhost를 가리키면 시작을 중단합니다.
+- Prisma CLI용 wrapper `scripts/with-database-url.cjs`를 추가했습니다.
+- `postinstall`, `prisma:generate`, `prisma:migrate`, `prisma:studio`가 wrapper를 통해 실행되도록 변경했습니다.
+- Dockerfile도 wrapper 스크립트를 복사하고 `npm run prisma:generate`를 사용하도록 수정했습니다.
+- KoDeploy 환경변수 안내를 README에 반영했습니다.
+
+수정 파일:
+
+- `readnest-api/src/config/runtime-env.ts`
+- `readnest-api/scripts/with-database-url.cjs`
+- `readnest-api/package.json`
+- `readnest-api/Dockerfile`
+- `readnest-api/.env.production.example`
+- `README.md`
+- `readnest-api/README.md`
+- `docs/PROGRESS_LOG.md`
+
+검증:
+
+```bash
+cd readnest-api && READNEST_SKIP_DOTENV=true env -u DATABASE_URL DB_HOST=db.example.com DB_PORT=3306 DB_NAME=readnest DB_USER=readnest_user DB_PASSWORD='secret-pass' node scripts/with-database-url.cjs prisma generate
+cd readnest-api && npm run build
+cd readnest-api && npm test -- --runInBand
+```
+
+결과:
+
+```text
+DB_*만으로 DATABASE_URL 생성 확인
+Prisma generate 성공
+Nest build 성공
+Jest 테스트 통과
+```
+
 ### KoDeploy Pod 시작 타임아웃 2차 대응
 
 KoDeploy 빌드는 성공하지만 컨테이너 실행 후 Pod 시작 타임아웃이 발생하는 문제를 추가 점검했습니다.

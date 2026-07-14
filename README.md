@@ -115,7 +115,6 @@ KoDeploy가 시작 명령어를 자동으로 `npm run start`로 잡아도 운영
 필수 환경변수:
 
 ```env
-DATABASE_URL=
 DB_HOST=
 DB_PORT=3306
 DB_NAME=
@@ -141,7 +140,9 @@ PLAYWRIGHT_SCROLL_COUNT=3
 EXTRACT_TEXT_LIMIT=50000
 ```
 
-`DATABASE_URL`이 있으면 이를 우선 사용합니다. 없으면 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`로 MySQL URL을 생성합니다.
+KoDeploy에서 MySQL 의존성을 사용하는 경우 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`만 등록하면 됩니다. 앱 시작 시 `mysql://DB_USER:DB_PASSWORD@DB_HOST:DB_PORT/DB_NAME` 형식의 `DATABASE_URL`을 자동 생성합니다.
+
+다른 배포 환경이나 로컬 개발에서는 `DATABASE_URL`을 직접 넣어도 됩니다. 우선순위는 `DATABASE_URL` 직접 값, 그다음 `DB_*` 조합입니다.
 
 `PORT`는 KoDeploy 앱 포트와 같은 값이어야 합니다. API는 `0.0.0.0`에 바인딩되도록 설정되어 있습니다.
 
@@ -153,7 +154,7 @@ EXTRACT_TEXT_LIMIT=50000
 
 | 변수 | 설명 |
 | --- | --- |
-| `DATABASE_URL` | MySQL 접속 문자열 |
+| `DATABASE_URL` | MySQL 접속 문자열. 있으면 우선 사용 |
 | `DB_HOST` | `DATABASE_URL`이 없을 때 사용할 DB host |
 | `DB_PORT` | `DATABASE_URL`이 없을 때 사용할 DB port |
 | `DB_NAME` | `DATABASE_URL`이 없을 때 사용할 DB name |

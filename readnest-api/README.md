@@ -258,11 +258,15 @@ KoDeploy가 Dockerfile을 사용하지 않고 Nixpacks를 사용할 경우 `nixp
 필수 환경변수:
 
 ```env
-DATABASE_URL=
 NODE_ENV=production
 PORT=3000
 JWT_SECRET=
 JWT_EXPIRES_IN=7d
+DB_HOST=
+DB_PORT=3306
+DB_NAME=
+DB_USER=
+DB_PASSWORD=
 REDIS_URL=
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.5-flash
@@ -273,15 +277,9 @@ PLAYWRIGHT_SCROLL_COUNT=3
 EXTRACT_TEXT_LIMIT=50000
 ```
 
-`DATABASE_URL` 대신 KoDeploy DB 변수를 사용할 수도 있습니다.
+KoDeploy에서 MySQL 의존성을 사용하는 경우 `DATABASE_URL`을 직접 등록하지 않아도 됩니다. 앱과 Prisma CLI wrapper가 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`를 조합해 `DATABASE_URL`을 생성합니다.
 
-```env
-DB_HOST=
-DB_PORT=3306
-DB_NAME=
-DB_USER=
-DB_PASSWORD=
-```
+직접 `DATABASE_URL`을 제공하는 환경에서는 해당 값을 우선 사용합니다.
 
 재배포 후 런타임 로그에서 아래 문구를 확인합니다.
 

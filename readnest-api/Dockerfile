@@ -4,12 +4,13 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
+COPY scripts ./scripts
 
 RUN npm ci
 
 COPY . .
 
-RUN npx prisma generate
+RUN npm run prisma:generate
 RUN npm run build
 RUN npm prune --omit=dev
 
