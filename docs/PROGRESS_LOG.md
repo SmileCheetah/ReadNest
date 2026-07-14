@@ -2263,3 +2263,27 @@ Jest 테스트 통과
 GET / -> HTTP 200 {"status":"ok"}
 GET /api/health -> HTTP 200, DB 오류는 database.status="error"로 응답 본문에 격리
 ```
+
+### KoDeploy Dockerfile 배포 전환 준비
+
+KoDeploy 화면에 별도 앱 포트 입력칸이 없는 경우 Dockerfile의 `EXPOSE 3000`을 통해 포트 의도를 더 명확히 전달할 수 있도록 Dockerfile 런타임 이미지를 점검했습니다.
+
+구현 내용:
+
+- `readnest-api/Dockerfile`은 이미 `EXPOSE 3000`을 포함하고 있습니다.
+- Dockerfile 방식으로 배포할 때 `npm run start:prod`가 필요한 `scripts/start-prod.cjs`를 찾을 수 있도록 runner 이미지에 `scripts` 폴더를 복사합니다.
+
+수정 파일:
+
+- `readnest-api/Dockerfile`
+
+권장 KoDeploy 설정:
+
+```text
+빌드 방식: Dockerfile
+앱 디렉토리: readnest-api
+Dockerfile 경로: Dockerfile
+PORT: 3000
+```
+
+KoDeploy가 Dockerfile 경로를 저장소 루트 기준으로 요구하면 `readnest-api/Dockerfile`을 사용합니다.
