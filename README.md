@@ -91,6 +91,39 @@ iOS 시뮬레이터에서는 기본값인 `http://localhost:3000/api`로 API 서
 EXPO_PUBLIC_API_BASE_URL=http://192.168.0.4:3000/api
 ```
 
+### 3. 백엔드 배포 참고
+
+`readnest-api`는 배포 환경에서 다음 기준으로 실행합니다.
+
+```text
+Root Directory: readnest-api
+Build Command: npm ci && npm run build
+Start Command: npm run start:prod
+Node: >=20.11.0
+```
+
+Nixpacks를 사용하는 플랫폼에서는 `readnest-api/nixpacks.toml`을 기준으로 Node 20과 `npm run start:prod`가 설정됩니다.
+
+필수 환경변수:
+
+```env
+DATABASE_URL=
+JWT_SECRET=
+JWT_EXPIRES_IN=7d
+REDIS_HOST=
+REDIS_PORT=6379
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash
+DAILY_SAVE_LIMIT=50
+SUMMARY_RETRY_LIMIT=3
+PLAYWRIGHT_CHANNEL=chrome
+PLAYWRIGHT_PAGE_TIMEOUT_MS=45000
+PLAYWRIGHT_SCROLL_COUNT=3
+EXTRACT_TEXT_LIMIT=50000
+```
+
+`PORT`는 배포 플랫폼이 주입하는 값을 사용합니다. API는 `0.0.0.0`에 바인딩되도록 설정되어 있습니다.
+
 ## 환경변수
 
 ### API

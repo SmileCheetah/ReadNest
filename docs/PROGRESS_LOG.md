@@ -1,5 +1,109 @@
 # ReadNest 진행상황 기록
 
+## 2026-07-14 백엔드 배포 시작 실패 대응
+
+### 문제
+
+배포 로그상 Docker 이미지 빌드와 push는 완료되었지만, 배포된 Pod가 제한 시간 안에 정상 시작되지 않는 문제가 있었습니다.
+
+빌드는 성공했으므로 NestJS 컴파일 문제가 아니라 실행 단계 문제로 판단했습니다.
+
+주요 후보:
+
+- API가 `0.0.0.0`으로 바인딩되지 않음
+- 배포 환경변수 누락
+- 시작 명령어가 `npm run start`로 되어 있어 빌드 결과 대신 개발 실행 경로를 탈 가능성
+- 배포 환경 Node 버전이 18이라 NestJS 11, `@google/genai` 요구사항과 맞지 않음
+
+### 변경 내용
+
+수정 파일:
+
+- `readnest-api/src/main.ts`
+- `readnest-api/package.json`
+- `README.md`
+
+추가 파일:
+
+- `readnest-api/nixpacks.toml`
+
+`main.ts` 변경:
+
+```ts
+const port = Number(process.env.PORT) || 3000;
+await app.listen(port, '0.0.0.0');
+console.log(`ReadNest API listening on port ${port}`);
+```
+
+`package.json`에는 Node 20 이상을 명시했습니다.
+
+```json
+{
+  "engines": {
+    "node": ">=20.11.0"
+  }
+}
+```
+
+Nixpacks 설정:
+
+```toml
+[phases.setup]
+nixPkgs = ["nodejs_20", "npm-10_x", "openssl"]
+
+[phases.build]
+cmds = ["npm ci", "npm run build"]
+
+[start]
+cmd = "npm run start:prod"
+```
+
+### 배포 설정 기준
+
+배포 플랫폼에는 다음 기준을 사용합니다.
+
+```text
+Root Directory: readnest-api
+Build Command: npm ci && npm run build
+Start Command: npm run start:prod
+Node: >=20.11.0
+```
+
+필수 환경변수:
+
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `JWT_EXPIRES_IN`
+- `REDIS_HOST`
+- `REDIS_PORT`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+- `DAILY_SAVE_LIMIT`
+- `SUMMARY_RETRY_LIMIT`
+- `PLAYWRIGHT_CHANNEL`
+- `PLAYWRIGHT_PAGE_TIMEOUT_MS`
+- `PLAYWRIGHT_SCROLL_COUNT`
+- `EXTRACT_TEXT_LIMIT`
+
+### 검증 결과
+
+아래 명령을 실행했습니다.
+
+```bash
+cd readnest-api
+npm run build
+npm test -- --runInBand
+node -v
+```
+
+결과:
+
+```text
+Nest build 성공
+Jest 테스트 1개 통과
+Node v20.19.5
+```
+
 ## 2026-07-14 GitHub 업로드 준비
 
 ### 작업 목적
