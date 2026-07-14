@@ -45,6 +45,28 @@ Initial ReadNest MVP
 
 확인 결과 `https://github.com/SmileCheetah/ReadNest.git` 원격 저장소는 아직 존재하지 않는 상태였습니다.
 
+### 2026-07-14 GitHub push 완료
+
+GitHub에서 `SmileCheetah/ReadNest` 저장소가 생성된 뒤 로컬 `origin`을 연결하고 `main` 브랜치를 push했습니다.
+
+원격 저장소:
+
+```text
+https://github.com/SmileCheetah/ReadNest
+```
+
+push된 최초 커밋:
+
+```text
+b7efdad Initial ReadNest MVP
+```
+
+확인 결과:
+
+```text
+main -> origin/main
+```
+
 ## 2026-07-14 모바일 API 주소 환경변수 분리
 
 ### 작업 목적
