@@ -18,6 +18,29 @@ function isProduction() {
   return process.env.NODE_ENV === 'production';
 }
 
+function normalizeEnvValue(value: string) {
+  return value.trim().replace(/^['"]|['"]$/g, '');
+}
+
+function normalizeNodeEnv(check: RuntimeEnvCheck) {
+  const nodeEnv = process.env.NODE_ENV;
+
+  if (!hasValue(nodeEnv)) {
+    process.env.NODE_ENV = 'production';
+    check.warnings.push(
+      'NODE_ENV was missing and defaulted to production for deployment runtime.',
+    );
+    return;
+  }
+
+  const normalizedNodeEnv = normalizeEnvValue(nodeEnv as string);
+
+  if (normalizedNodeEnv !== nodeEnv) {
+    process.env.NODE_ENV = normalizedNodeEnv;
+    check.warnings.push('NODE_ENV was normalized.');
+  }
+}
+
 function getUrlHostname(value: string) {
   try {
     return new URL(value).hostname.toLowerCase();
@@ -65,10 +88,7 @@ function normalizePrismaMysqlUrl(databaseUrl: string) {
 }
 
 function validateNodeEnv(check: RuntimeEnvCheck) {
-  if (!hasValue(process.env.NODE_ENV)) {
-    check.missing.push('NODE_ENV');
-    return;
-  }
+  normalizeNodeEnv(check);
 
   if (!VALID_NODE_ENVS.has(process.env.NODE_ENV as string)) {
     check.missing.push('NODE_ENV must be development, test, or production');

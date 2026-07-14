@@ -1798,6 +1798,44 @@ NODE_ENV 없이 start:prod 실행 시 production으로 기본 설정 확인
 ReadNest API listening on port 4310 확인
 ```
 
+### NODE_ENV 값 정규화 보강
+
+KoDeploy 런타임에서 여전히 예전 이미지가 실행되거나, 환경변수 UI에 `NODE_ENV` 값이 따옴표 포함으로 저장될 수 있는 상황을 고려해 런타임 환경 검증을 한 번 더 보강했습니다.
+
+확인한 로그:
+
+```text
+[env] Missing or invalid environment variables: NODE_ENV must be development, test, or production
+```
+
+수정 내용:
+
+- `NODE_ENV`가 없으면 앱 내부에서 `production`으로 기본 설정합니다.
+- `NODE_ENV`가 `"production"` 또는 `'production'`처럼 따옴표를 포함해도 `production`으로 정규화합니다.
+- 정규화 시 `[env]` 경고 로그를 출력합니다.
+
+수정 파일:
+
+- `readnest-api/src/config/runtime-env.ts`
+
+검증:
+
+```bash
+cd readnest-api && npm run build
+cd readnest-api && npm test -- --runInBand
+cd readnest-api && READNEST_SKIP_DOTENV=true env -u NODE_ENV PORT=3000 DATABASE_URL='mysql+pymysql://app:pass@mysql:3306/app' JWT_SECRET='12345678901234567890123456789012' REDIS_URL='rediss://default:pass@redis.example.com:6379' GEMINI_API_KEY='test-key' node -e "require('./dist/config/runtime-env').validateRuntimeEnv(); console.log(process.env.NODE_ENV, process.env.DATABASE_URL)"
+cd readnest-api && READNEST_SKIP_DOTENV=true NODE_ENV='"production"' PORT=3000 DATABASE_URL='mysql+pymysql://app:pass@mysql:3306/app' JWT_SECRET='12345678901234567890123456789012' REDIS_URL='rediss://default:pass@redis.example.com:6379' GEMINI_API_KEY='test-key' node -e "require('./dist/config/runtime-env').validateRuntimeEnv(); console.log(process.env.NODE_ENV, process.env.DATABASE_URL)"
+```
+
+결과:
+
+```text
+Nest build 성공
+Jest 테스트 통과
+NODE_ENV 누락 시 production 기본 설정 확인
+NODE_ENV 따옴표 포함 값 정규화 확인
+```
+
 ### KoDeploy Pod 시작 타임아웃 2차 대응
 
 KoDeploy 빌드는 성공하지만 컨테이너 실행 후 Pod 시작 타임아웃이 발생하는 문제를 추가 점검했습니다.
