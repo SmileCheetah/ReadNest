@@ -38,6 +38,4 @@ RUN npx playwright install --with-deps chromium \
 
 USER node
 
-EXPOSE 3000
-
 CMD ["npm", "run", "start:prod"]

@@ -2264,14 +2264,15 @@ GET / -> HTTP 200 {"status":"ok"}
 GET /api/health -> HTTP 200, DB 오류는 database.status="error"로 응답 본문에 격리
 ```
 
-### KoDeploy Dockerfile 배포 전환 준비
+### KoDeploy Dockerfile 포트 힌트 단일화
 
-KoDeploy 화면에 별도 앱 포트 입력칸이 없는 경우 Dockerfile의 `EXPOSE 3000`을 통해 포트 의도를 더 명확히 전달할 수 있도록 Dockerfile 런타임 이미지를 점검했습니다.
+KoDeploy Dockerfile 배포에서 Kubernetes Service 포트가 중복 생성되지 않도록 포트 힌트를 `PORT=3000` 환경변수 기준으로 단일화했습니다.
 
 구현 내용:
 
-- `readnest-api/Dockerfile`은 이미 `EXPOSE 3000`을 포함하고 있습니다.
 - Dockerfile 방식으로 배포할 때 `npm run start:prod`가 필요한 `scripts/start-prod.cjs`를 찾을 수 있도록 runner 이미지에 `scripts` 폴더를 복사합니다.
+- KoDeploy가 `EXPOSE 3000`과 환경변수 `PORT=3000`을 중복 포트로 해석해 Kubernetes Service 생성 시 `spec.ports[].name` 오류를 낼 수 있어 `EXPOSE 3000`을 제거했습니다.
+- 포트는 KoDeploy 환경변수 `PORT=3000`과 NestJS의 `process.env.PORT` 처리로 단일화합니다.
 
 수정 파일:
 
