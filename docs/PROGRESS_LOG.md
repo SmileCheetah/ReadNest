@@ -104,6 +104,81 @@ Jest 테스트 1개 통과
 Node v20.19.5
 ```
 
+### 2026-07-14 KoDeploy 설정 재점검
+
+KoDeploy가 자동 감지한 설정은 Node 18, `npm run start`였으므로 런타임 실패 가능성이 남아 있었습니다.
+
+실제 파일 확인 결과:
+
+- `nest-cli.json`의 `sourceRoot`는 `src`
+- `tsconfig.json`의 `outDir`는 `./dist`
+- 실제 빌드 출력 파일은 `dist/main.js`
+- 기존 `start:prod`는 `node dist/main`이었으나 명확하게 `node dist/main.js`로 변경
+- KoDeploy 자동 시작 명령어가 `npm run start`여도 운영 빌드 결과를 실행하도록 `start`도 `node dist/main.js`로 변경
+
+추가 변경:
+
+- 런타임 환경변수 검증 추가
+- `DATABASE_URL`이 없을 때 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`로 MySQL URL 생성
+- `JWT_SECRET` 누락 시 명확한 오류 로그 후 시작 중단
+- `GEMINI_API_KEY` 누락 시 fallback 요약 사용 경고 출력
+- Prisma DB 연결 실패 시 `DATABASE_URL` 또는 KoDeploy DB 환경변수 확인 메시지 출력
+- Node 22 기반 멀티 스테이지 `readnest-api/Dockerfile` 추가
+- `readnest-api/.dockerignore` 추가
+- Nixpacks Node 버전을 Node 22로 변경
+
+KoDeploy 권장 입력값:
+
+```text
+Repository: SmileCheetah/ReadNest
+Branch: main
+App Directory: readnest-api
+Port: 3000
+Dockerfile Path: readnest-api/Dockerfile
+Build Command: npm ci && npm run build
+Start Command: npm run start
+```
+
+확인할 런타임 로그:
+
+```text
+ReadNest API listening on port 3000
+Connected to database
+```
+
+검증 결과:
+
+```bash
+cd readnest-api
+npm run prisma:generate
+npm run build
+npm test -- --runInBand
+PORT=4030 npm run start
+```
+
+결과:
+
+```text
+Prisma Client 생성 성공
+Nest build 성공
+Jest 테스트 1개 통과
+GET /api/health 정상 응답
+```
+
+환경변수 누락 테스트:
+
+```text
+[env] ReadNest API cannot start.
+[env] Missing or invalid environment variables: DATABASE_URL or DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, JWT_SECRET
+[env] Configure KoDeploy environment variables before redeploying.
+```
+
+로컬 Docker build는 Docker CLI는 설치되어 있으나 Docker daemon이 꺼져 있어 실행하지 못했습니다.
+
+```text
+Cannot connect to the Docker daemon
+```
+
 ### 2026-07-14 환경변수 보강
 
 배포 플랫폼에서 Redis를 `REDIS_URL` 하나로 제공하는 경우를 고려해 Redis 설정을 확장했습니다.

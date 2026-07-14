@@ -97,18 +97,32 @@ EXPO_PUBLIC_API_BASE_URL=http://192.168.0.4:3000/api
 
 ```text
 Root Directory: readnest-api
-Build Command: npm ci && npm run build
-Start Command: npm run start:prod
-Node: >=20.11.0
+Runtime: Dockerfile 또는 Node.js
+App Directory: readnest-api
+Port: 3000
+Dockerfile Path: readnest-api/Dockerfile
+Build Command: npm ci && npm run prisma:generate && npm run build
+Start Command: npm run start 또는 npm run start:prod
+Node: >=20.11.0, 권장 22
 ```
 
-Nixpacks를 사용하는 플랫폼에서는 `readnest-api/nixpacks.toml`을 기준으로 Node 20과 `npm run start:prod`가 설정됩니다.
+KoDeploy가 Dockerfile을 사용하면 `readnest-api/Dockerfile` 기준으로 Node 22 멀티 스테이지 빌드를 수행합니다.
+
+Nixpacks를 사용하는 경우에는 `readnest-api/nixpacks.toml`을 기준으로 Node 22와 `npm run start:prod`가 설정됩니다.
+
+KoDeploy가 시작 명령어를 자동으로 `npm run start`로 잡아도 운영 빌드 결과인 `dist/main.js`를 실행하도록 설정되어 있습니다.
 
 필수 환경변수:
 
 ```env
 DATABASE_URL=
+DB_HOST=
+DB_PORT=3306
+DB_NAME=
+DB_USER=
+DB_PASSWORD=
 NODE_ENV=production
+PORT=3000
 JWT_SECRET=
 JWT_EXPIRES_IN=7d
 REDIS_URL=
@@ -127,7 +141,9 @@ PLAYWRIGHT_SCROLL_COUNT=3
 EXTRACT_TEXT_LIMIT=50000
 ```
 
-`PORT`는 배포 플랫폼이 주입하는 값을 사용합니다. API는 `0.0.0.0`에 바인딩되도록 설정되어 있습니다.
+`DATABASE_URL`이 있으면 이를 우선 사용합니다. 없으면 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`로 MySQL URL을 생성합니다.
+
+`PORT`는 KoDeploy 앱 포트와 같은 값이어야 합니다. API는 `0.0.0.0`에 바인딩되도록 설정되어 있습니다.
 
 ## 환경변수
 
@@ -138,6 +154,11 @@ EXTRACT_TEXT_LIMIT=50000
 | 변수 | 설명 |
 | --- | --- |
 | `DATABASE_URL` | MySQL 접속 문자열 |
+| `DB_HOST` | `DATABASE_URL`이 없을 때 사용할 DB host |
+| `DB_PORT` | `DATABASE_URL`이 없을 때 사용할 DB port |
+| `DB_NAME` | `DATABASE_URL`이 없을 때 사용할 DB name |
+| `DB_USER` | `DATABASE_URL`이 없을 때 사용할 DB user |
+| `DB_PASSWORD` | `DATABASE_URL`이 없을 때 사용할 DB password |
 | `NODE_ENV` | 실행 환경. 배포에서는 `production` 권장 |
 | `PORT` | NestJS API 서버 포트 |
 | `JWT_SECRET` | JWT 서명 secret |

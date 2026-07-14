@@ -1,8 +1,13 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { config } from 'dotenv';
 import { AppModule } from './app.module';
+import { validateRuntimeEnv } from './config/runtime-env';
 
 async function bootstrap() {
+  config({ quiet: true });
+  validateRuntimeEnv();
+
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
   app.useGlobalPipes(
