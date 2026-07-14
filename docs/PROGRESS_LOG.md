@@ -1662,6 +1662,8 @@ https://www.threads.com/@specwave_official/post/DZjm_c7mnlK?hl=ko
 
 검증:
 
+필수 배포 환경변수(`DATABASE_URL` 또는 `DB_*`, `JWT_SECRET`, `GEMINI_API_KEY`, `REDIS_URL`)를 채운 상태에서 확인했습니다.
+
 ```bash
 cd readnest-api && npm run build
 cd readnest-api && npm test -- --runInBand
@@ -2224,4 +2226,40 @@ Nest build 성공
 Jest 테스트 통과
 e2e 테스트 통과
 React Native TypeScript 검사 통과
+```
+
+### KoDeploy 루트 헬스체크 보강
+
+KoDeploy가 컨테이너 외부에서 즉시 확인할 수 있는 루트 헬스체크를 더 단순하게 정리했습니다.
+
+구현 내용:
+
+- NestJS 서버 시작 로그에 실제 바인딩 주소 `0.0.0.0:${PORT}`를 출력합니다.
+- `GET /` 응답을 외부 서비스 접근 없는 `{ "status": "ok" }`로 고정했습니다.
+- 상세 상태 확인용 `GET /api/health`는 유지하되 DB 실패가 루트 헬스체크에 영향을 주지 않게 분리했습니다.
+- 루트 헬스체크 테스트 기대값을 실제 배포 체크 기준에 맞췄습니다.
+
+수정 파일:
+
+- `readnest-api/src/main.ts`
+- `readnest-api/src/app.service.ts`
+- `readnest-api/src/app.controller.spec.ts`
+
+검증:
+
+```bash
+cd readnest-api && npm run build
+cd readnest-api && npm test -- --runInBand
+cd readnest-api && NODE_ENV=production PORT=3000 npm run start:prod
+curl -i http://127.0.0.1:3000/
+curl -i http://127.0.0.1:3000/api/health
+```
+
+결과:
+
+```text
+Nest build 성공
+Jest 테스트 통과
+GET / -> HTTP 200 {"status":"ok"}
+GET /api/health -> HTTP 200, DB 오류는 database.status="error"로 응답 본문에 격리
 ```

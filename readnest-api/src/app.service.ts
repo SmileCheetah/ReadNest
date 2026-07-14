@@ -8,8 +8,6 @@ export class AppService {
   getRootHealth() {
     return {
       status: 'ok',
-      service: 'readnest-api',
-      timestamp: new Date().toISOString(),
     };
   }
 
