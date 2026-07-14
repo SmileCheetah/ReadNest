@@ -1754,6 +1754,50 @@ Jest 테스트 통과
 런타임 환경 검증 통과
 ```
 
+### KoDeploy 런타임 NODE_ENV 누락 대응
+
+KoDeploy 런타임 로그에서 `NODE_ENV`가 누락되어 앱이 시작 전에 중단되는 문제를 확인했습니다.
+
+로그:
+
+```text
+[env] ReadNest API cannot start.
+[env] Missing or invalid environment variables: NODE_ENV
+```
+
+원인:
+
+- Nixpacks 빌드 단계에는 `NODE_ENV=production`이 표시되지만, 컨테이너 런타임에는 `NODE_ENV`가 전달되지 않을 수 있습니다.
+- 기존 `start:prod`가 `node dist/main.js`만 실행해서 앱 내부 환경 검증 전에 기본값을 보장하지 못했습니다.
+
+수정 내용:
+
+- `scripts/start-prod.cjs`를 추가했습니다.
+- `start`, `start:prod`가 `node scripts/start-prod.cjs`를 실행하도록 변경했습니다.
+- wrapper는 `NODE_ENV`가 없을 때만 `production`으로 설정한 뒤 `dist/main.js`를 로드합니다.
+
+수정 파일:
+
+- `readnest-api/package.json`
+- `readnest-api/scripts/start-prod.cjs`
+
+검증:
+
+```bash
+cd readnest-api && npm run build
+cd readnest-api && npm test -- --runInBand
+cd readnest-api && env -u NODE_ENV PORT=4310 DATABASE_URL='mysql+pymysql://app:pass@mysql:3306/app' JWT_SECRET='12345678901234567890123456789012' REDIS_URL='rediss://default:pass@redis.example.com:6379' GEMINI_API_KEY='test-key' npm run start:prod
+```
+
+결과:
+
+```text
+Nest build 성공
+Jest 테스트 통과
+NODE_ENV 없이 start:prod 실행 시 production으로 기본 설정 확인
+ReadNest API listening on port 4310 확인
+```
+
 ### KoDeploy Pod 시작 타임아웃 2차 대응
 
 KoDeploy 빌드는 성공하지만 컨테이너 실행 후 Pod 시작 타임아웃이 발생하는 문제를 추가 점검했습니다.
