@@ -1672,6 +1672,63 @@ Jest 테스트 통과
 React Native TypeScript 검사 통과
 ```
 
+### KoDeploy Pod 시작 타임아웃 2차 대응
+
+KoDeploy 빌드는 성공하지만 컨테이너 실행 후 Pod 시작 타임아웃이 발생하는 문제를 추가 점검했습니다.
+
+확인 내용:
+
+- Nixpacks 빌드 로그상 `npm ci`, `npm run build`, 이미지 export/push는 성공했습니다.
+- 런타임에서 포트가 열리기 전 실패하는 원인 후보를 확인했습니다.
+- `PrismaService.onModuleInit()`이 앱 부팅 중 `$connect()`를 강제하고, DB 연결 실패 시 예외를 던지는 구조였습니다.
+- 이 구조에서는 DB 환경변수 오류, DB 준비 지연, 네트워크 지연이 있으면 `app.listen()`까지 도달하지 못할 수 있습니다.
+
+수정 내용:
+
+- Prisma DB 연결을 Nest 부팅 필수 조건에서 제거했습니다.
+- `/api/health`에서 DB 연결 상태를 확인하도록 변경했습니다.
+- DB 연결 실패 시 서버를 종료하지 않고 `database.status: "error"`와 오류 메시지를 응답에 포함합니다.
+- 헬스 체크 테스트를 비동기 응답 구조에 맞게 수정했습니다.
+
+검증:
+
+```bash
+cd readnest-api && npm run build
+cd readnest-api && npm test -- --runInBand
+cd readnest-api && NODE_ENV=production PORT=4300 DATABASE_URL='mysql://bad:bad@127.0.0.1:65535/readnest' JWT_SECRET='local-prod-test-secret' REDIS_HOST='127.0.0.1' REDIS_PORT='65534' GEMINI_API_KEY='' npm run start:prod
+curl -sS http://127.0.0.1:4300/api/health
+```
+
+결과:
+
+```text
+Nest build 성공
+Jest 테스트 통과
+잘못된 DB 주소에서도 ReadNest API listening on port 4300 출력 확인
+/api/health 응답 확인
+```
+
+헬스 체크 예시:
+
+```json
+{
+  "status": "ok",
+  "service": "readnest-api",
+  "scope": "threads-mvp",
+  "database": {
+    "status": "error",
+    "message": "Can't reach database server ..."
+  }
+}
+```
+
+남은 배포 확인 항목:
+
+- KoDeploy에 `DATABASE_URL` 또는 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` 등록
+- KoDeploy에 `JWT_SECRET` 등록
+- 요약 기능을 사용할 경우 `GEMINI_API_KEY` 등록
+- BullMQ 요약 큐를 사용할 경우 `REDIS_URL` 또는 Redis 개별 환경변수 등록
+
 ### 요약본 삭제 기능
 
 백엔드에 이미 구현된 `DELETE /api/articles/:id`를 모바일 상세 화면에 연결했습니다.
