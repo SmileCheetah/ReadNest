@@ -16,12 +16,41 @@ import { SummaryModule } from './summary/summary.module';
     }),
     BullModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('REDIS_HOST') ?? 'localhost',
-          port: Number(configService.get<string>('REDIS_PORT') ?? 6379),
-        },
-      }),
+      useFactory: (configService: ConfigService) => {
+        const redisUrl = configService.get<string>('REDIS_URL');
+
+        if (redisUrl) {
+          const url = new URL(redisUrl);
+
+          return {
+            connection: {
+              host: url.hostname,
+              port:
+                Number(url.port) || (url.protocol === 'rediss:' ? 6380 : 6379),
+              username: url.username
+                ? decodeURIComponent(url.username)
+                : undefined,
+              password: url.password
+                ? decodeURIComponent(url.password)
+                : undefined,
+              tls: url.protocol === 'rediss:' ? {} : undefined,
+            },
+          };
+        }
+
+        return {
+          connection: {
+            host: configService.get<string>('REDIS_HOST') ?? 'localhost',
+            port: Number(configService.get<string>('REDIS_PORT') ?? 6379),
+            username: configService.get<string>('REDIS_USERNAME') || undefined,
+            password: configService.get<string>('REDIS_PASSWORD') || undefined,
+            tls:
+              configService.get<string>('REDIS_TLS') === 'true'
+                ? {}
+                : undefined,
+          },
+        };
+      },
     }),
     PrismaModule,
     AuthModule,

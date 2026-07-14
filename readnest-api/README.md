@@ -190,9 +190,15 @@ Authorization: Bearer <accessToken>
 Redis 환경 변수:
 
 ```env
+REDIS_URL=""
 REDIS_HOST="localhost"
 REDIS_PORT=6379
+REDIS_USERNAME=""
+REDIS_PASSWORD=""
+REDIS_TLS=false
 ```
+
+`REDIS_URL`이 설정되어 있으면 URL 값을 우선 사용합니다. `rediss://` URL은 TLS Redis로 처리합니다.
 
 Gemini 환경 변수:
 

@@ -104,6 +104,29 @@ Jest 테스트 1개 통과
 Node v20.19.5
 ```
 
+### 2026-07-14 환경변수 보강
+
+배포 플랫폼에서 Redis를 `REDIS_URL` 하나로 제공하는 경우를 고려해 Redis 설정을 확장했습니다.
+
+추가/정리한 환경변수:
+
+- `NODE_ENV`
+- `REDIS_URL`
+- `REDIS_USERNAME`
+- `REDIS_PASSWORD`
+- `REDIS_TLS`
+
+`REDIS_URL`이 설정되어 있으면 이를 우선 사용합니다. `rediss://` URL은 TLS Redis로 처리합니다.
+
+수정 파일:
+
+- `readnest-api/src/app.module.ts`
+- `readnest-api/.env.example`
+- `readnest-api/.env.local-mysql.example`
+- `readnest-api/.env.docker.example`
+- `readnest-api/README.md`
+- `README.md`
+
 ## 2026-07-14 GitHub 업로드 준비
 
 ### 작업 목적
