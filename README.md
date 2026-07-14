@@ -1,0 +1,148 @@
+# ReadNest
+
+SNS와 웹에서 발견한 유용한 글을 공유 한 번으로 저장하고, AI가 요약하여 날짜별 아카이브로 정리해주는 개인 지식 큐레이션 서비스입니다.
+
+## 문서
+
+- [원본 기획서](./docs/PROJECT_BRIEF.md)
+- [작업 기준 문서](./docs/WORKING_NOTES.md)
+- [MVP 구현 계획](./docs/MVP_PLAN.md)
+- [진행상황 기록](./docs/PROGRESS_LOG.md)
+- [남은 작업 정리](./docs/REMAINING_WORK.md)
+
+## 현재 결정 사항
+
+- Backend: NestJS, TypeScript (`readnest-api`)
+- Database: MySQL
+- ORM: Prisma
+- Auth: JWT
+- Async jobs: Redis, BullMQ
+- AI summary: OpenAI 또는 Gemini API
+- Frontend: React Native / Expo (`readnest-mobile`)
+
+## 현재 구현 상태
+
+- JWT 기반 회원가입, 로그인, 내 정보 조회
+- 사용자별 Threads URL 저장, 목록, 상세, 삭제
+- 중복 URL 방지와 읽음 상태 관리
+- Redis/BullMQ 기반 비동기 요약 큐
+- Gemini API 기반 AI 요약과 fallback 요약
+- Playwright/fetch 기반 원문 추출
+- React Native 앱의 홈, 아카이브, 상세, 설정 화면
+- 요약 복사, OS 공유, 재시도 버튼 1차 구현
+
+## 로컬 실행
+
+### 1. 백엔드 준비
+
+```bash
+cd /Users/m3air/Desktop/Code/Node/ReadNest/readnest-api
+npm install
+cp .env.local-mysql.example .env
+```
+
+Homebrew MySQL과 Redis를 사용할 경우:
+
+```bash
+brew services start mysql
+brew services start redis
+```
+
+Docker를 사용할 경우 Docker Desktop을 켠 뒤:
+
+```bash
+cp .env.docker.example .env
+docker compose up -d
+```
+
+Prisma Client와 DB migration:
+
+```bash
+npm run prisma:generate
+npm run prisma:migrate
+```
+
+API 서버 실행:
+
+```bash
+npm run start:dev
+```
+
+Health check:
+
+```text
+GET http://localhost:3000/api/health
+```
+
+### 2. 모바일 앱 준비
+
+```bash
+cd /Users/m3air/Desktop/Code/Node/ReadNest/readnest-mobile
+npm install
+cp .env.example .env.local
+npm run start -- --clear
+```
+
+iOS 시뮬레이터에서는 기본값인 `http://localhost:3000/api`로 API 서버에 접근할 수 있습니다.
+
+실제 기기에서 Expo Go로 테스트할 때는 `.env.local`에 Mac의 LAN IP를 넣습니다.
+
+```env
+EXPO_PUBLIC_API_BASE_URL=http://192.168.0.4:3000/api
+```
+
+## 환경변수
+
+### API
+
+`readnest-api/.env.example` 또는 `readnest-api/.env.local-mysql.example`을 기준으로 설정합니다.
+
+| 변수 | 설명 |
+| --- | --- |
+| `DATABASE_URL` | MySQL 접속 문자열 |
+| `PORT` | NestJS API 서버 포트 |
+| `JWT_SECRET` | JWT 서명 secret |
+| `JWT_EXPIRES_IN` | access token 만료 시간 |
+| `REDIS_HOST` | Redis host |
+| `REDIS_PORT` | Redis port |
+| `GEMINI_API_KEY` | Gemini API key. 비어 있으면 fallback 요약 사용 |
+| `GEMINI_MODEL` | Gemini 요약 모델 |
+| `DAILY_SAVE_LIMIT` | 사용자별 하루 저장 제한 |
+| `SUMMARY_RETRY_LIMIT` | 요약 수동 재시도 제한 |
+| `PLAYWRIGHT_CHANNEL` | Playwright 브라우저 channel |
+| `PLAYWRIGHT_PAGE_TIMEOUT_MS` | 페이지 로딩 timeout |
+| `PLAYWRIGHT_SCROLL_COUNT` | Threads 추출 시 스크롤 횟수 |
+| `EXTRACT_TEXT_LIMIT` | 요약에 전달할 원문 최대 길이 |
+
+### Mobile
+
+`readnest-mobile/.env.example`을 기준으로 설정합니다.
+
+| 변수 | 설명 |
+| --- | --- |
+| `EXPO_PUBLIC_API_BASE_URL` | 모바일 앱이 호출할 ReadNest API 주소 |
+
+## 검증 명령
+
+API:
+
+```bash
+cd readnest-api
+npm run build
+npm test -- --runInBand
+```
+
+Mobile:
+
+```bash
+cd readnest-mobile
+npm run typecheck
+```
+
+## 개발 원칙
+
+- MVP 흐름을 먼저 안정적으로 완성합니다.
+- 기능은 작은 단위로 나누어 구현합니다.
+- NestJS의 Controller, Service, DTO, Module 구조를 명확히 유지합니다.
+- 데이터 접근은 Prisma를 통해 처리합니다.
+- 요약 처리는 API 요청 안에서 직접 수행하지 않고 큐 기반 비동기 작업으로 분리합니다.

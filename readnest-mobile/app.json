@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "ReadNest",
+    "slug": "readnest-mobile",
+    "version": "0.1.0",
+    "scheme": "readnest",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#f6f5f4"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.readnest.mobile"
+    },
+    "android": {
+      "package": "com.readnest.mobile"
+    },
+    "plugins": ["expo-font", "expo-secure-store"]
+  }
+}

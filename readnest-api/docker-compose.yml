@@ -1,0 +1,34 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: readnest-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: readnest
+      MYSQL_USER: readnest_user
+      MYSQL_PASSWORD: 'ReadNest2026!'
+      MYSQL_ROOT_PASSWORD: 'ReadNestRoot2026!'
+    ports:
+      - '3307:3306'
+    volumes:
+      - readnest_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.4
+    container_name: readnest-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  readnest_mysql_data:

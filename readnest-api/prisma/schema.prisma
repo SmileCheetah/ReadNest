@@ -1,0 +1,107 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum ArticleSource {
+  THREADS
+}
+
+enum ProcessStatus {
+  SAVED
+  SUMMARIZING
+  SUMMARY_DONE
+  SUMMARY_FAILED
+  CONTEXT_INSUFFICIENT
+}
+
+enum ReadStatus {
+  UNREAD
+  READ
+  READ_LATER
+}
+
+enum ThreadGroupStatus {
+  PARTIAL
+  COMPLETE
+  MERGED_SUMMARY_DONE
+}
+
+model User {
+  id           String         @id @default(cuid())
+  email        String         @unique
+  passwordHash String
+  nickname     String
+  articles     SavedArticle[]
+  threadGroups ThreadGroup[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@map("users")
+}
+
+model SavedArticle {
+  id                   String        @id @default(cuid())
+  userId               String
+  source               ArticleSource @default(THREADS)
+  url                  String        @db.Text
+  normalizedUrl        String
+  title                String?
+  author               String?
+  rawText              String?       @db.LongText
+  summary              String?       @db.Text
+  summaryMeta          Json?
+  keyPoints            Json?
+  tags                 Json?
+  extractionStatus     String?
+  extractionConfidence Float?
+  summaryRetryCount    Int           @default(0)
+  lastSummaryError     String?       @db.Text
+  processStatus        ProcessStatus @default(SAVED)
+  readStatus           ReadStatus    @default(UNREAD)
+  savedAt              DateTime      @default(now())
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  user                 User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  threadParts          ThreadPart[]
+
+  @@unique([userId, normalizedUrl])
+  @@index([userId, savedAt])
+  @@index([userId, processStatus])
+  @@index([userId, readStatus])
+  @@map("saved_articles")
+}
+
+model ThreadGroup {
+  id        String            @id @default(cuid())
+  userId    String
+  title     String?
+  status    ThreadGroupStatus @default(PARTIAL)
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parts     ThreadPart[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@index([userId, status])
+  @@map("thread_groups")
+}
+
+model ThreadPart {
+  id             String       @id @default(cuid())
+  threadGroupId  String
+  savedArticleId String
+  partNumber     Int
+  totalParts     Int
+  url            String       @db.Text
+  createdAt      DateTime     @default(now())
+  threadGroup    ThreadGroup  @relation(fields: [threadGroupId], references: [id], onDelete: Cascade)
+  savedArticle   SavedArticle @relation(fields: [savedArticleId], references: [id], onDelete: Cascade)
+
+  @@unique([threadGroupId, partNumber])
+  @@unique([savedArticleId])
+  @@map("thread_parts")
+}
