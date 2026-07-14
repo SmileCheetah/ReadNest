@@ -1719,6 +1719,41 @@ Nest build 성공
 Jest 테스트 통과
 ```
 
+### KoDeploy DATABASE_URL 형식 호환 보강
+
+KoDeploy 문서에서 MySQL 의존성 사용 시 `DATABASE_URL`이 `mysql+pymysql://...` 형식으로 함께 주입될 수 있음을 확인했습니다. 이 값은 Python용 접속 문자열에 가깝고 Prisma MySQL datasource는 `mysql://...` 형식을 기대하므로, 런타임과 Prisma CLI wrapper를 보강했습니다.
+
+수정 내용:
+
+- `DATABASE_URL=mysql://...`이면 그대로 사용합니다.
+- `DATABASE_URL=mysql+pymysql://...`이면 `mysql://...`로 정규화합니다.
+- `DATABASE_URL`이 Prisma와 맞지 않는 다른 형식이고 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`가 있으면 DB 변수 조합값으로 다시 생성합니다.
+- 정규화 또는 재생성 시 `[env]` 경고 로그를 출력합니다.
+- Prisma CLI wrapper에도 같은 정규화 로직을 적용했습니다.
+
+수정 파일:
+
+- `readnest-api/src/config/runtime-env.ts`
+- `readnest-api/scripts/with-database-url.cjs`
+
+검증:
+
+```bash
+cd readnest-api && READNEST_SKIP_DOTENV=true DATABASE_URL='mysql+pymysql://app:pass@mysql:3306/app' node scripts/with-database-url.cjs node -e "console.log(process.env.DATABASE_URL)"
+cd readnest-api && npm run build
+cd readnest-api && npm test -- --runInBand
+cd readnest-api && READNEST_SKIP_DOTENV=true NODE_ENV=production PORT=3000 DATABASE_URL='mysql+pymysql://app:pass@mysql:3306/app' JWT_SECRET='12345678901234567890123456789012' REDIS_URL='rediss://default:pass@redis.example.com:6379' GEMINI_API_KEY='test-key' node -e "require('./dist/config/runtime-env').validateRuntimeEnv(); console.log(process.env.DATABASE_URL)"
+```
+
+결과:
+
+```text
+mysql+pymysql:// URL이 mysql:// URL로 정규화됨
+Nest build 성공
+Jest 테스트 통과
+런타임 환경 검증 통과
+```
+
 ### KoDeploy Pod 시작 타임아웃 2차 대응
 
 KoDeploy 빌드는 성공하지만 컨테이너 실행 후 Pod 시작 타임아웃이 발생하는 문제를 추가 점검했습니다.

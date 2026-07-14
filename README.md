@@ -144,6 +144,8 @@ KoDeploy에서 MySQL 의존성을 사용하는 경우 `DB_HOST`, `DB_PORT`, `DB_
 
 다른 배포 환경이나 로컬 개발에서는 `DATABASE_URL`을 직접 넣어도 됩니다. 우선순위는 `DATABASE_URL` 직접 값, 그다음 `DB_*` 조합입니다.
 
+KoDeploy가 Python용 `mysql+pymysql://...` 형식의 `DATABASE_URL`을 함께 주입하는 경우에는 앱 시작 시 Prisma 호환 형식인 `mysql://...`로 자동 정규화합니다.
+
 `PORT`는 KoDeploy 앱 포트와 같은 값이어야 합니다. API는 `0.0.0.0`에 바인딩되도록 설정되어 있습니다.
 
 ## 환경변수

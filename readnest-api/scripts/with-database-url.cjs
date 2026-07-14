@@ -26,8 +26,39 @@ function buildDatabaseUrlFromParts() {
   return `mysql://${user}:${password}@${DB_HOST}:${DB_PORT}/${database}`;
 }
 
+function normalizePrismaMysqlUrl(databaseUrl) {
+  const trimmed = databaseUrl.trim();
+
+  if (trimmed.startsWith('mysql://')) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith('mysql+pymysql://')) {
+    return trimmed.replace(/^mysql\+pymysql:\/\//, 'mysql://');
+  }
+
+  return null;
+}
+
 function ensureDatabaseUrl() {
-  if (hasValue(process.env.DATABASE_URL)) return;
+  if (hasValue(process.env.DATABASE_URL)) {
+    const configuredDatabaseUrl = process.env.DATABASE_URL;
+    const normalizedDatabaseUrl = normalizePrismaMysqlUrl(
+      configuredDatabaseUrl,
+    );
+
+    if (normalizedDatabaseUrl) {
+      process.env.DATABASE_URL = normalizedDatabaseUrl;
+
+      if (normalizedDatabaseUrl !== configuredDatabaseUrl.trim()) {
+        console.warn(
+          '[env] DATABASE_URL was normalized to a Prisma-compatible mysql:// URL.',
+        );
+      }
+
+      return;
+    }
+  }
 
   const databaseUrl = buildDatabaseUrlFromParts();
 

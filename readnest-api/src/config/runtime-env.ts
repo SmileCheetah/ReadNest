@@ -50,6 +50,20 @@ function buildDatabaseUrlFromParts() {
   return `mysql://${user}:${password}@${host}:${port}/${database}`;
 }
 
+function normalizePrismaMysqlUrl(databaseUrl: string) {
+  const trimmed = databaseUrl.trim();
+
+  if (trimmed.startsWith('mysql://')) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith('mysql+pymysql://')) {
+    return trimmed.replace(/^mysql\+pymysql:\/\//, 'mysql://');
+  }
+
+  return null;
+}
+
 function validateNodeEnv(check: RuntimeEnvCheck) {
   if (!hasValue(process.env.NODE_ENV)) {
     check.missing.push('NODE_ENV');
@@ -72,11 +86,41 @@ function validatePort(check: RuntimeEnvCheck) {
 }
 
 function validateDatabase(check: RuntimeEnvCheck) {
-  if (!hasValue(process.env.DATABASE_URL)) {
-    const databaseUrl = buildDatabaseUrlFromParts();
+  const configuredDatabaseUrl = process.env.DATABASE_URL;
 
-    if (databaseUrl) {
-      process.env.DATABASE_URL = databaseUrl;
+  if (hasValue(configuredDatabaseUrl)) {
+    const normalizedDatabaseUrl = normalizePrismaMysqlUrl(
+      configuredDatabaseUrl as string,
+    );
+
+    if (normalizedDatabaseUrl) {
+      process.env.DATABASE_URL = normalizedDatabaseUrl;
+
+      if (normalizedDatabaseUrl !== configuredDatabaseUrl?.trim()) {
+        check.warnings.push(
+          'DATABASE_URL was normalized to a Prisma-compatible mysql:// URL.',
+        );
+      }
+    } else {
+      const databaseUrlFromParts = buildDatabaseUrlFromParts();
+
+      if (databaseUrlFromParts) {
+        process.env.DATABASE_URL = databaseUrlFromParts;
+        check.warnings.push(
+          'DATABASE_URL was not Prisma-compatible. It was rebuilt from DB_HOST, DB_PORT, DB_NAME, DB_USER, and DB_PASSWORD.',
+        );
+      } else {
+        check.missing.push(
+          'DATABASE_URL must use mysql://, or DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD must be set',
+        );
+        return;
+      }
+    }
+  } else {
+    const databaseUrlFromParts = buildDatabaseUrlFromParts();
+
+    if (databaseUrlFromParts) {
+      process.env.DATABASE_URL = databaseUrlFromParts;
       check.warnings.push(
         'DATABASE_URL was built from DB_HOST, DB_PORT, DB_NAME, DB_USER, and DB_PASSWORD.',
       );
