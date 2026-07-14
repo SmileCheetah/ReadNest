@@ -249,11 +249,11 @@ Branch: main
 App Directory: readnest-api
 Port: 3000
 Dockerfile Path: readnest-api/Dockerfile
-Build Command: npm ci && npm run prisma:generate && npm run build
+Build Command: npm run build
 Start Command: npm run start
 ```
 
-KoDeploy가 Dockerfile을 사용하지 않고 Nixpacks를 사용할 경우 `nixpacks.toml`이 Node 22와 `npm run start:prod`를 지정합니다.
+KoDeploy가 Dockerfile을 사용하지 않고 Nixpacks를 사용할 경우 `nixpacks.toml`이 Node 22, `npm run build`, `npm run start:prod`를 지정합니다. Nixpacks install phase에서 이미 `npm ci`가 실행되므로 build command에 `npm ci`를 다시 넣지 않습니다.
 
 필수 환경변수:
 

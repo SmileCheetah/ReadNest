@@ -101,14 +101,14 @@ Runtime: Dockerfile 또는 Node.js
 App Directory: readnest-api
 Port: 3000
 Dockerfile Path: readnest-api/Dockerfile
-Build Command: npm ci && npm run prisma:generate && npm run build
+Build Command: npm run build
 Start Command: npm run start 또는 npm run start:prod
 Node: >=20.11.0, 권장 22
 ```
 
 KoDeploy가 Dockerfile을 사용하면 `readnest-api/Dockerfile` 기준으로 Node 22 멀티 스테이지 빌드를 수행합니다.
 
-Nixpacks를 사용하는 경우에는 `readnest-api/nixpacks.toml`을 기준으로 Node 22와 `npm run start:prod`가 설정됩니다.
+Nixpacks를 사용하는 경우에는 `readnest-api/nixpacks.toml`을 기준으로 install phase에서 `npm ci`, build phase에서 `npm run build`, start phase에서 `npm run start:prod`가 실행됩니다.
 
 KoDeploy가 시작 명령어를 자동으로 `npm run start`로 잡아도 운영 빌드 결과인 `dist/main.js`를 실행하도록 설정되어 있습니다.
 

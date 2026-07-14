@@ -179,6 +179,33 @@ GET /api/health 정상 응답
 Cannot connect to the Docker daemon
 ```
 
+### 2026-07-14 KoDeploy Nixpacks build cache 충돌 수정
+
+KoDeploy 빌드 로그에서 실제 실패 지점은 런타임이 아니라 Nixpacks build phase였습니다.
+
+실패 로그:
+
+```text
+npm error EBUSY: resource busy or locked, rmdir '/app/node_modules/.cache'
+```
+
+원인:
+
+- Nixpacks install phase에서 이미 `npm ci`를 실행했습니다.
+- `nixpacks.toml` build phase에도 `npm ci`를 다시 넣어둔 상태였습니다.
+- 두 번째 `npm ci`가 `node_modules`를 정리하는 과정에서 BuildKit cache mount인 `/app/node_modules/.cache`를 삭제하려다 `EBUSY`로 실패했습니다.
+
+수정:
+
+```toml
+[phases.build]
+cmds = ["npm run build"]
+```
+
+Prisma Client 생성은 `package.json`의 `postinstall`에서 `prisma generate`를 실행하므로 install phase에서 처리됩니다.
+
+KoDeploy build command 문서도 `npm run build`로 변경했습니다.
+
 ### 2026-07-14 환경변수 보강
 
 배포 플랫폼에서 Redis를 `REDIS_URL` 하나로 제공하는 경우를 고려해 Redis 설정을 확장했습니다.
