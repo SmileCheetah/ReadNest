@@ -5,6 +5,14 @@ import { PrismaService } from './prisma/prisma.service';
 export class AppService {
   constructor(private readonly prisma: PrismaService) {}
 
+  getRootHealth() {
+    return {
+      status: 'ok',
+      service: 'readnest-api',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   async getHealth() {
     const database = await this.prisma.checkConnection();
 

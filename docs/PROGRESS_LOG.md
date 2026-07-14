@@ -1836,6 +1836,44 @@ NODE_ENV 누락 시 production 기본 설정 확인
 NODE_ENV 따옴표 포함 값 정규화 확인
 ```
 
+### 루트 헬스체크 엔드포인트 추가
+
+KoDeploy 런타임 로그에서 앱은 정상적으로 `ReadNest API listening on port 3000`까지 도달했지만 배포 화면이 완료로 전환되지 않는 상황을 고려해, 플랫폼 readiness가 루트 경로 `/`를 확인해도 200 OK를 받을 수 있도록 보강했습니다.
+
+수정 내용:
+
+- `GET /` 루트 헬스체크 엔드포인트를 추가했습니다.
+- 기존 `GET /api/health`는 유지했습니다.
+- `GET /`는 DB 체크 없이 가볍게 API 프로세스 상태만 반환합니다.
+- `GET /api/health`는 기존처럼 DB 상태까지 포함합니다.
+- global prefix `api`에서 `/` 경로만 제외했습니다.
+
+수정 파일:
+
+- `readnest-api/src/main.ts`
+- `readnest-api/src/app.controller.ts`
+- `readnest-api/src/app.service.ts`
+- `readnest-api/src/app.controller.spec.ts`
+
+검증:
+
+```bash
+cd readnest-api && npm run build
+cd readnest-api && npm test -- --runInBand
+cd readnest-api && PORT=4320 DATABASE_URL='mysql+pymysql://app:pass@mysql:3306/app' JWT_SECRET='12345678901234567890123456789012' REDIS_URL='rediss://default:pass@redis.example.com:6379' GEMINI_API_KEY='test-key' npm run start:prod
+curl -i http://127.0.0.1:4320/
+curl -i http://127.0.0.1:4320/api/health
+```
+
+결과:
+
+```text
+Nest build 성공
+Jest 테스트 통과
+GET / 200 OK 확인
+GET /api/health 200 OK 확인
+```
+
 ### KoDeploy Pod 시작 타임아웃 2차 대응
 
 KoDeploy 빌드는 성공하지만 컨테이너 실행 후 Pod 시작 타임아웃이 발생하는 문제를 추가 점검했습니다.

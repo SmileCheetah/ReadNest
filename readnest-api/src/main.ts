@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { config } from 'dotenv';
 import { AppModule } from './app.module';
 import { validateRuntimeEnv } from './config/runtime-env';
@@ -9,7 +9,9 @@ async function bootstrap() {
   validateRuntimeEnv();
 
   const app = await NestFactory.create(AppModule);
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix('api', {
+    exclude: [{ path: '/', method: RequestMethod.GET }],
+  });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

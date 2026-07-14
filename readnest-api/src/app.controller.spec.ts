@@ -24,6 +24,13 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
+    it('should return root health status', () => {
+      expect(appController.getRoot()).toMatchObject({
+        status: 'ok',
+        service: 'readnest-api',
+      });
+    });
+
     it('should return health status', async () => {
       await expect(appController.getHealth()).resolves.toMatchObject({
         status: 'ok',
