@@ -2393,3 +2393,64 @@ KoDeploy 분리 검증 설정:
 수동 PORT 환경변수: 등록하지 않음
 프론트엔드/캐시/영속 저장소: 사용 안 함
 ```
+
+### Expo iOS 시뮬레이터 연결 복구
+
+`xcrun simctl openurl ... exp://192.168.0.4:8081`이 코드 60 타임아웃으로 실패하는 문제를 점검했습니다.
+
+확인 결과:
+
+- Metro는 `0.0.0.0:8081`에서 정상 실행 중이었고 localhost와 LAN 주소 모두 응답했습니다.
+- 시뮬레이터와 Expo Go 설치 상태도 정상이었습니다.
+- 프로젝트는 Expo SDK 51인데 시뮬레이터에는 SDK 54용 Expo Go가 설치되어 있었습니다.
+- `expo-doctor`는 SDK 51이 현재 Xcode 26.4.1과 호환되지 않는다고 진단했습니다.
+
+처리 내용:
+
+- iOS 시뮬레이터의 Expo Go를 SDK 51 호환 버전 `2.31.6`으로 교체했습니다.
+- `readnest-mobile/.env.local`에 배포 API 주소를 설정했습니다.
+- Metro 캐시를 비우고 LAN 주소로 다시 연결했습니다.
+
+검증 결과:
+
+- ReadNest 로그인 화면이 시뮬레이터에서 정상 로드되었습니다.
+- 앱에 표시되는 API 주소가 `https://readnest.kodeploy.com/api`로 적용되었습니다.
+- 장기적으로는 최신 Xcode 및 Expo Go와의 호환을 위해 Expo SDK 업그레이드가 필요합니다.
+
+### KoDeploy 운영 DB 마이그레이션 자동화
+
+모바일 회원가입과 로그인 요청이 모두 HTTP 500으로 실패하는 문제를 점검했습니다.
+
+확인 결과:
+
+- 배포 API의 `/`와 `/api/health`는 HTTP 200이었습니다.
+- 시뮬레이터 Safari에서도 `/api/health`가 정상 응답해 모바일 네트워크 문제를 배제했습니다.
+- `/api/auth/signup`과 `/api/auth/login`은 HTTP 500을 반환했습니다.
+- 기존 운영 시작 절차에는 `prisma generate`만 있고 `prisma migrate deploy`가 없었습니다.
+- DB 연결 검사는 단순 쿼리로 통과하지만 `users` 테이블을 사용하는 인증 요청은 실패할 수 있는 구조였습니다.
+
+수정 내용:
+
+- `start:prod` 실행 시 API 시작 전에 `prisma migrate deploy`를 수행합니다.
+- 마이그레이션 실패 시 명확한 로그를 출력하고 API 시작을 중단합니다.
+- 운영 이미지에서 Prisma CLI를 사용할 수 있도록 `prisma`를 운영 의존성으로 이동했습니다.
+- 수동 운영 마이그레이션용 `prisma:migrate:deploy` 스크립트를 추가했습니다.
+
+재배포 후 예상 로그:
+
+```text
+[db] Applying pending Prisma migrations...
+Applying migration `20260613231136_init`
+Applying migration `20260615000000_summary_metadata`
+[db] Prisma migrations are up to date.
+ReadNest API listening on 0.0.0.0:3000
+```
+
+검증:
+
+```text
+Nest build 성공
+Jest 2개 테스트 통과
+Prisma CLI 운영 의존성 포함 확인
+로컬 Docker 데몬 미실행으로 로컬 MySQL 적용 검증은 생략
+```

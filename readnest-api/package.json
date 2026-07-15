@@ -19,6 +19,7 @@
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "prisma:generate": "node scripts/with-database-url.cjs prisma generate",
     "prisma:migrate": "node scripts/with-database-url.cjs prisma migrate dev",
+    "prisma:migrate:deploy": "node scripts/with-database-url.cjs prisma migrate deploy",
     "prisma:studio": "node scripts/with-database-url.cjs prisma studio",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -44,6 +45,7 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "playwright": "^1.60.0",
+    "prisma": "6.19.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
@@ -64,7 +66,6 @@
     "globals": "^17.0.0",
     "jest": "^30.0.0",
     "prettier": "^3.4.2",
-    "prisma": "6.19.3",
     "source-map-support": "^0.5.21",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.5",
