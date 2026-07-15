@@ -2326,3 +2326,41 @@ KoDeploy 화면에서는 자동 빌드 방식으로 앱 포트를 지정할 수 
 - 런타임에서 `Nest application successfully started`가 출력되었습니다.
 - API가 `ReadNest API listening on 0.0.0.0:3000`까지 정상 실행되었습니다.
 - 따라서 애플리케이션과 컨테이너 포트 바인딩은 정상이며, 422는 KoDeploy Service 생성 단계의 포트 중복 문제입니다.
+
+### KoDeploy Prisma ARM64 런타임 엔진 수정
+
+KoDeploy 컨테이너에서 API가 정상 시작된 직후 Prisma Query Engine 불일치로 종료되는 문제를 수정했습니다.
+
+발견된 오류:
+
+```text
+Prisma Client could not locate the Query Engine for runtime "linux-arm64-openssl-3.0.x".
+Prisma Client was generated for "linux-arm64-openssl-1.1.x".
+```
+
+수정 내용:
+
+- Docker builder 단계에도 OpenSSL을 설치해 `prisma generate`가 실제 OpenSSL 3 환경을 감지하게 했습니다.
+- Prisma Client의 `binaryTargets`에 `native`와 `linux-arm64-openssl-3.0.x`를 명시했습니다.
+- 로컬 개발용 native 엔진과 KoDeploy ARM64 런타임 엔진이 함께 생성되도록 구성했습니다.
+
+수정 파일:
+
+- `readnest-api/Dockerfile`
+- `readnest-api/prisma/schema.prisma`
+
+검증:
+
+```bash
+cd readnest-api && npm run prisma:generate
+cd readnest-api && npm run build
+cd readnest-api && npm test -- --runInBand
+```
+
+결과:
+
+```text
+linux-arm64-openssl-3.0.x Query Engine 생성 확인
+Nest build 성공
+Jest 2개 테스트 통과
+```
