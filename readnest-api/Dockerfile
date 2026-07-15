@@ -35,8 +35,6 @@ COPY --from=builder /app/scripts ./scripts
 RUN npx playwright install --with-deps chromium \
   && rm -rf /var/lib/apt/lists/*
 
-EXPOSE 3000
-
 USER node
 
 CMD ["npm", "run", "start:prod"]
