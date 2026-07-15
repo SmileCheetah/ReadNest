@@ -23,6 +23,10 @@ export class ContentExtractorService {
         if (renderedContent.text.length > 200) {
           return renderedContent;
         }
+
+        this.logger.warn(
+          `Threads browser extraction returned only ${renderedContent.text.length} characters. Using HTTP fallback.`,
+        );
       }
 
       const response = await fetch(url, {
@@ -108,15 +112,17 @@ export class ContentExtractorService {
           timeout: 5000,
         })
         .catch(() => '');
+      const cleanedText = this.cleanThreadsText(bodyText).slice(
+        0,
+        Number(this.configService.get<string>('EXTRACT_TEXT_LIMIT') ?? 50000),
+      );
+      const hasUsefulText = cleanedText.length > 200;
 
       return {
         title: title ? this.cleanThreadsTitle(title) : undefined,
-        text: this.cleanThreadsText(bodyText).slice(
-          0,
-          Number(this.configService.get<string>('EXTRACT_TEXT_LIMIT') ?? 50000),
-        ),
-        extractionStatus: bodyText.length > 200 ? 'SUCCESS' : 'FAILED',
-        extractionConfidence: bodyText.length > 200 ? 0.9 : 0.2,
+        text: cleanedText,
+        extractionStatus: hasUsefulText ? 'SUCCESS' : 'FAILED',
+        extractionConfidence: hasUsefulText ? 0.9 : 0.2,
       };
     } catch (error) {
       this.logger.warn(
@@ -137,23 +143,27 @@ export class ContentExtractorService {
 
   private async launchBrowser() {
     const channel = this.configService.get<string>('PLAYWRIGHT_CHANNEL');
+    const launchOptions = {
+      headless: true,
+      args: ['--disable-dev-shm-usage', '--no-sandbox'],
+    };
 
-    try {
-      return await chromium.launch({
-        ...(channel ? { channel } : { channel: 'chrome' }),
-        headless: true,
-      });
-    } catch (error) {
-      this.logger.warn(
-        `Playwright launch with channel failed, retrying bundled Chromium: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-
-      return chromium.launch({
-        headless: true,
-      });
+    if (channel) {
+      try {
+        return await chromium.launch({
+          ...launchOptions,
+          channel,
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Playwright launch with channel failed, retrying bundled Chromium: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
+
+    return chromium.launch(launchOptions);
   }
 
   private extractMeta(html: string, name: string) {

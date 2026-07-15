@@ -2454,3 +2454,38 @@ Jest 2개 테스트 통과
 Prisma CLI 운영 의존성 포함 확인
 로컬 Docker 데몬 미실행으로 로컬 MySQL 적용 검증은 생략
 ```
+
+### KoDeploy Threads 연속 글 추출 복구
+
+19개로 이어지는 Threads URL을 저장했을 때 메인 글만 요약되는 문제를 실제 게시물로 재현했습니다.
+
+원인:
+
+- 연속 글은 메인 URL 페이지에서 Playwright로 렌더링된 작성자 답글을 함께 읽는 구조입니다.
+- 번호 감지와 `ThreadGroup` 연결은 이미 저장된 파트를 분류할 뿐, 후속 URL을 직접 수집하는 기능은 아닙니다.
+- 로컬 Chrome에서는 19개 전체가 추출됐지만 KoDeploy 결과는 `FALLBACK_SUCCESS`, 신뢰도 `0.55`, 원문 1,428자였습니다.
+- 운영 결과에 1번과 17번 파트가 모두 없었으므로 Gemini 요약 문제가 아니라 Playwright 실행 실패 후 HTTP 메타데이터 fallback으로 전환된 문제였습니다.
+- Dockerfile은 Chromium을 설치하지만 자동 빌드용 `nixpacks.toml`에는 브라우저 설치 단계가 없었습니다.
+
+수정 내용:
+
+- Nixpacks build phase에 `npx playwright install --with-deps chromium`을 추가했습니다.
+- `PLAYWRIGHT_BROWSERS_PATH=0`으로 Chromium을 `node_modules` 아래에 포함합니다.
+- Kubernetes 컨테이너에서 Chromium이 작은 `/dev/shm`과 sandbox 제약으로 종료되지 않도록 실행 옵션을 추가했습니다.
+- 설정된 Chrome 채널이 없으면 설치된 bundled Chromium으로 재시도합니다.
+- 정제된 Threads 본문 길이를 기준으로 추출 성공 여부를 판단합니다.
+- 브라우저 본문이 부족해 fallback으로 전환될 때 원문 길이를 런타임 로그에 남깁니다.
+- 번호형 작성자 답글 유지와 `관련 스레드`/로그인 경계 제거 테스트를 추가했습니다.
+
+검증 결과:
+
+```text
+Nest build 성공
+Jest 2개 스위트, 4개 테스트 통과
+실제 19개 Threads 글 추출 상태 SUCCESS
+추출 신뢰도 0.9
+1번과 17번 파트 포함 확인
+관련 스레드 제외 확인
+```
+
+재배포 후 동일 URL을 다시 저장하거나 요약을 재시도해 `extractionStatus=SUCCESS`, `extractionConfidence=0.9`인지 확인해야 합니다.

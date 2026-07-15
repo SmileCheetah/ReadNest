@@ -1,8 +1,12 @@
 [phases.setup]
 nixPkgs = ["nodejs_22", "npm-10_x", "openssl"]
 
+[variables]
+PLAYWRIGHT_BROWSERS_PATH = "0"
+PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT = "120000"
+
 [phases.build]
-cmds = ["npm run build"]
+cmds = ["npm run build", "npx playwright install --with-deps chromium"]
 
 [start]
 cmd = "npm run start:prod"

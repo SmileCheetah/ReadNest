@@ -108,7 +108,7 @@ Node: >=20.11.0, 권장 22
 
 KoDeploy가 Dockerfile을 사용하면 `readnest-api/Dockerfile` 기준으로 Node 22 멀티 스테이지 빌드를 수행합니다.
 
-Nixpacks를 사용하는 경우에는 `readnest-api/nixpacks.toml`을 기준으로 install phase에서 `npm ci`, build phase에서 `npm run build`, start phase에서 `npm run start:prod`가 실행됩니다.
+Nixpacks를 사용하는 경우에는 `readnest-api/nixpacks.toml`을 기준으로 install phase에서 `npm ci`, build phase에서 Nest 빌드와 Playwright Chromium 설치, start phase에서 `npm run start:prod`가 실행됩니다. Chromium은 `node_modules` 아래에 포함되어 non-root 컨테이너에서도 Threads 연속 글 추출에 사용됩니다.
 
 KoDeploy가 시작 명령어를 자동으로 `npm run start`로 잡아도 운영 빌드 결과인 `dist/main.js`를 실행하도록 설정되어 있습니다.
 

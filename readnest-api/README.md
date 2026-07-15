@@ -253,7 +253,7 @@ Build Command: npm run build
 Start Command: npm run start
 ```
 
-KoDeploy가 Dockerfile을 사용하지 않고 Nixpacks를 사용할 경우 `nixpacks.toml`이 Node 22, `npm run build`, `npm run start:prod`를 지정합니다. Nixpacks install phase에서 이미 `npm ci`가 실행되므로 build command에 `npm ci`를 다시 넣지 않습니다.
+KoDeploy가 Dockerfile을 사용하지 않고 Nixpacks를 사용할 경우 `nixpacks.toml`이 Node 22, `npm run build`, Playwright Chromium 설치, `npm run start:prod`를 지정합니다. Nixpacks install phase에서 이미 `npm ci`가 실행되므로 build command에 `npm ci`를 다시 넣지 않습니다. `PLAYWRIGHT_BROWSERS_PATH=0`으로 브라우저를 `node_modules` 아래에 포함해 non-root 런타임에서도 사용할 수 있게 합니다.
 
 필수 환경변수:
 
