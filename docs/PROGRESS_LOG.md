@@ -2305,7 +2305,7 @@ spec.ports[1].name: Required value
 - API는 `process.env.PORT || 3000`을 사용하고 `0.0.0.0`에 정상 바인딩합니다.
 - Dockerfile의 `EXPOSE`와 `ENV PORT`는 제거하고 KoDeploy 화면의 `포트 3000`만 단일 포트 힌트로 사용합니다.
 - 저장소 루트에는 `readnest-api`와 `readnest-mobile` 두 애플리케이션이 있습니다.
-- `readnest-api/docker-compose.yml`에는 로컬 개발용 MySQL과 Redis 포트 두 개가 선언되어 있습니다.
+- 기존 `readnest-api/docker-compose.yml`에는 로컬 개발용 MySQL과 Redis 포트 두 개가 선언되어 있었습니다.
 - 따라서 실패 지점은 NestJS 실행이 아니라 KoDeploy가 두 개의 이름 없는 포트를 가진 Kubernetes Service를 자동 생성하는 단계입니다.
 
 KoDeploy 화면에서는 자동 빌드 방식으로 앱 포트를 지정할 수 없으므로 Dockerfile 방식을 사용해야 합니다.
@@ -2363,4 +2363,33 @@ cd readnest-api && npm test -- --runInBand
 linux-arm64-openssl-3.0.x Query Engine 생성 확인
 Nest build 성공
 Jest 2개 테스트 통과
+```
+
+### KoDeploy Compose 자동 탐색 분리
+
+KoDeploy가 로컬 개발용 Compose 파일의 MySQL과 Redis 포트를 앱 Service 포트로 잘못 수집할 가능성을 제거했습니다.
+
+수정 내용:
+
+- `readnest-api/docker-compose.yml`을 `readnest-api/docker-compose.local.yml`로 변경했습니다.
+- 로컬 전용 Compose 파일을 Docker 빌드 컨텍스트에서 제외했습니다.
+- 로컬 실행 명령에 `-f docker-compose.local.yml`을 명시했습니다.
+- KoDeploy 자동 탐색에서는 NestJS 앱 포트 3000만 확인하도록 배포 파일과 로컬 인프라 파일을 분리했습니다.
+
+로컬 실행:
+
+```bash
+cd readnest-api
+docker compose -f docker-compose.local.yml up -d
+```
+
+KoDeploy 분리 검증 설정:
+
+```text
+런타임: JavaScript
+빌드 방식: 자동 빌드
+앱 디렉토리: readnest-api
+포트: 3000
+수동 PORT 환경변수: 등록하지 않음
+프론트엔드/캐시/영속 저장소: 사용 안 함
 ```

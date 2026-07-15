@@ -22,10 +22,10 @@ Docker MySQL을 사용하려면 Docker Desktop을 실행한 뒤 아래 명령을
 
 ```bash
 cp .env.docker.example .env
-docker compose up -d
+docker compose -f docker-compose.local.yml up -d
 ```
 
-요약 큐 처리를 위해 Redis도 필요합니다. Docker를 쓰는 경우 `docker compose up -d`로 MySQL과 Redis가 함께 실행됩니다.
+요약 큐 처리를 위해 Redis도 필요합니다. Docker를 쓰는 경우 `docker compose -f docker-compose.local.yml up -d`로 MySQL과 Redis가 함께 실행됩니다.
 
 Homebrew MySQL을 쓰는 경우 Redis는 별도로 실행합니다.
 

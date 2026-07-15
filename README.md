@@ -52,7 +52,7 @@ Docker를 사용할 경우 Docker Desktop을 켠 뒤:
 
 ```bash
 cp .env.docker.example .env
-docker compose up -d
+docker compose -f docker-compose.local.yml up -d
 ```
 
 Prisma Client와 DB migration:

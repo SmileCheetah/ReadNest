@@ -44,7 +44,7 @@
 
 ```bash
 cd /Users/m3air/Desktop/Code/Node/ReadNest/readnest-api
-docker compose up -d
+docker compose -f docker-compose.local.yml up -d
 npm run prisma:migrate
 npm run start:dev
 ```
