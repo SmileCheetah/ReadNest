@@ -1,22 +1,46 @@
 {
   "expo": {
-    "name": "ReadNest",
+    "name": "Unwind",
     "slug": "readnest-mobile",
     "version": "0.1.0",
     "scheme": "readnest",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "splash": {
-      "backgroundColor": "#f6f5f4"
-    },
-    "assetBundlePatterns": ["**/*"],
+    "icon": "./assets/icon.png",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.readnest.mobile"
+      "bundleIdentifier": "com.readnest.mobile",
+      "buildNumber": "1"
     },
     "android": {
-      "package": "com.readnest.mobile"
+      "package": "com.readnest.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#f6f5f4"
+      }
     },
-    "plugins": ["expo-font", "expo-secure-store"]
+    "plugins": [
+      "expo-font",
+      "expo-secure-store",
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#f6f5f4",
+          "image": "./assets/icon.png",
+          "imageWidth": 160,
+          "resizeMode": "contain"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "cb2aef4c-1c73-4504-a520-f467409b134f"
+      }
+    },
+    "owner": "kkzw18837"
   }
 }

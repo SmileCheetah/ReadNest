@@ -2,6 +2,8 @@
 
 Threads 저장과 AI 요약 흐름을 확인하기 위한 React Native 앱 프론트입니다.
 
+현재 Expo SDK 57과 EAS Build로 Android API 36 배포를 지원합니다. Android preview/production 배포 상태와 명령은 [`../docs/ANDROID_RELEASE.md`](../docs/ANDROID_RELEASE.md)를 참고합니다.
+
 ## 실행
 
 ```bash

@@ -1,10 +1,10 @@
 # ReadNest 작업 상태 요약
 
-2026-08-23 기준 문서입니다.
+2026-09-03 기준 문서입니다.
 
 ## 한 줄 요약
 
-ReadNest는 핵심 MVP 기능은 대부분 구현된 상태이며, 지금은 실제 운용 검증과 UX/품질 정리를 진행해야 하는 단계입니다.
+프로젝트 내부명은 ReadNest이며, Google Play 테스트 출시 앱 이름은 `Unwind`로 정리했습니다. 핵심 MVP 기능은 대부분 구현된 상태이며, 지금은 실제 운용 검증과 Play Store Internal testing 준비를 진행하는 단계입니다.
 
 ## 구현 완료된 상태
 
@@ -26,6 +26,10 @@ ReadNest는 핵심 MVP 기능은 대부분 구현된 상태이며, 지금은 실
 - 요약 상태 표시
 - API 주소 환경변수 분리
 - 검색 및 필터 연결
+- Expo SDK 57 및 Android API 36 업그레이드
+- EAS 프로젝트/서명 키/Android preview APK 구성
+- Google Play 개발자 계정 본인 확인 절차 제출 완료
+- 앱 아이콘과 스플래시 구성
 
 ## 아직 남아 있는 핵심 과제
 
@@ -62,17 +66,21 @@ ReadNest는 핵심 MVP 기능은 대부분 구현된 상태이며, 지금은 실
 ### 5) 배포 및 시연 준비
 
 - 운영 DB, Redis 구성
-- 배포 대상 결정
+- 공개 HTTPS API 배포
+- Google Play Internal testing용 production AAB 업로드
+- Google Play Console 등록 정보와 개인정보처리방침 준비
 - 실제 기기 테스트
 - 공유 저장 흐름 검토
 
+Android 설치용 preview APK 빌드는 성공했으며, 다음 목표는 공개 HTTPS API를 연결한 production AAB를 Google Play Internal testing에 업로드하는 것입니다. 자세한 내용은 [ANDROID_RELEASE.md](./ANDROID_RELEASE.md)를 참고합니다.
+
 ## 추천 우선순위
 
-1. 로컬 통합 실행 확인
-2. 실제 Threads URL 저장 QA
-3. 요약 상태 UX 정리
-4. 테스트 보강
-5. 배포 및 실제 기기 QA
+1. 공개 HTTPS API 및 production 환경변수 확인
+2. `Unwind` 이름으로 production AAB 빌드
+3. Google Play Internal testing 업로드
+4. 실제 Android 기기에서 저장-요약-조회 QA
+5. 오류 수정 및 반복 배포
 
 ## 결론
 

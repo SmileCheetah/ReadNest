@@ -8,6 +8,7 @@ import { ArticlesModule } from './articles/articles.module';
 import { AuthModule } from './auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SummaryModule } from './summary/summary.module';
+import { PrivacyController } from './privacy.controller';
 
 @Module({
   imports: [
@@ -61,7 +62,7 @@ import { SummaryModule } from './summary/summary.module';
     SummaryModule,
     ArticlesModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, PrivacyController],
   providers: [AppService],
 })
 export class AppModule {}
