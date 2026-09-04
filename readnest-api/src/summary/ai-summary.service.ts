@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import OpenAI from 'openai';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
@@ -28,14 +28,14 @@ export type StructuredSummaryResult = {
 @Injectable()
 export class AiSummaryService {
   private readonly logger = new Logger(AiSummaryService.name);
-  private readonly client: GoogleGenAI | null;
+  private readonly client: OpenAI | null;
   private readonly model: string;
 
   constructor(configService: ConfigService) {
-    const apiKey = configService.get<string>('GEMINI_API_KEY');
+    const apiKey = configService.get<string>('OPENAI_API_KEY');
     this.model =
-      configService.get<string>('GEMINI_MODEL') ?? 'gemini-2.5-flash';
-    this.client = apiKey ? new GoogleGenAI({ apiKey }) : null;
+      configService.get<string>('OPENAI_MODEL') ?? 'gpt-5.6-luna';
+    this.client = apiKey ? new OpenAI({ apiKey }) : null;
   }
 
   async summarize(input: {
@@ -48,9 +48,9 @@ export class AiSummaryService {
     }
 
     try {
-      const response = await this.client.models.generateContent({
+      const response = await this.client.responses.create({
         model: this.model,
-        contents: [
+        input: [
           '너는 ReadNest의 콘텐츠 요약 엔진이다.',
           'ReadNest는 사용자가 SNS와 웹에서 발견한 글을 저장하면 AI가 내용을 요약하고 날짜별 아카이브로 정리해주는 개인 지식 큐레이션 서비스다.',
           '너의 역할은 원문을 짧게 줄이는 것이 아니라 사용자가 나중에 다시 읽기 좋도록 핵심 의미를 구조화하는 것이다.',
@@ -96,32 +96,31 @@ export class AiSummaryService {
           '아이디어 저장형은 아이디어 핵심, 해결 문제, 타깃 사용자, 적용할 부분을 담는다.',
           '행동 추천형은 핵심 조언, 바로 할 행동, 주의할 점, 실천 난이도를 담는다.',
         ].join('\n'),
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              summaryType: { type: Type.STRING },
-              title: { type: Type.STRING },
-              oneLineSummary: { type: Type.STRING },
-              coreSummary: { type: Type.STRING },
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'unwind_summary',
+            strict: true,
+            schema: {
+              type: 'object',
+              properties: {
+              summaryType: { type: 'string' },
+              title: { type: 'string' },
+              oneLineSummary: { type: 'string' },
+              coreSummary: { type: 'string' },
               keyPoints: {
-                type: Type.ARRAY,
-                minItems: '3',
-                maxItems: '5',
-                items: { type: Type.STRING },
+                type: 'array',
+                items: { type: 'string' },
               },
               tags: {
-                type: Type.ARRAY,
-                minItems: '3',
-                maxItems: '5',
-                items: { type: Type.STRING },
+                type: 'array',
+                items: { type: 'string' },
               },
-              readingValue: { type: Type.STRING },
-              caution: { type: Type.STRING },
-              contextStatus: { type: Type.STRING },
-              threadStatus: { type: Type.STRING },
-              confidence: { type: Type.NUMBER },
+              readingValue: { type: 'string' },
+              caution: { type: 'string' },
+              contextStatus: { type: 'string' },
+              threadStatus: { type: 'string' },
+              confidence: { type: 'number' },
             },
             required: [
               'summaryType',
@@ -136,30 +135,19 @@ export class AiSummaryService {
               'threadStatus',
               'confidence',
             ],
-            propertyOrdering: [
-              'summaryType',
-              'title',
-              'oneLineSummary',
-              'coreSummary',
-              'keyPoints',
-              'tags',
-              'readingValue',
-              'caution',
-              'contextStatus',
-              'threadStatus',
-              'confidence',
-            ],
+              additionalProperties: false,
+            },
           },
         },
       });
 
       return this.normalizeSummary(
-        JSON.parse(response.text ?? '{}') as StructuredSummaryResult,
+        JSON.parse(response.output_text || '{}') as StructuredSummaryResult,
         input,
       );
     } catch (error) {
       this.logger.warn(
-        `Gemini summary failed, using fallback: ${
+        `OpenAI summary failed, using fallback: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -183,7 +171,7 @@ export class AiSummaryService {
             '요약 유형: 기타',
             `한 줄 요약: ${title}에 대한 저장글입니다.`,
             '',
-            '핵심 요약: Gemini API 키가 설정되면 원문 의미를 구조화한 요약으로 자동 생성됩니다.',
+            '핵심 요약: OpenAI API 키가 설정되면 원문 의미를 구조화한 요약으로 자동 생성됩니다.',
             '',
             '읽을 가치: 저장한 원문을 나중에 다시 검토할 수 있도록 보관되었습니다.',
             '주의점: 현재는 AI 요약 대신 fallback 요약이 저장되었습니다.',
@@ -277,7 +265,7 @@ export class AiSummaryService {
       title,
       oneLineSummary: `${title}에 대한 저장글입니다.`,
       coreSummary:
-        'Gemini API 키가 설정되면 원문 의미를 구조화한 요약으로 자동 생성됩니다.',
+        'OpenAI API 키가 설정되면 원문 의미를 구조화한 요약으로 자동 생성됩니다.',
       keyPoints: this.createFallbackKeyPoints(input.text),
       tags: ['Threads', 'ReadNest', '요약대기'],
       readingValue:

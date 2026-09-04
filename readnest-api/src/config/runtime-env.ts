@@ -210,16 +210,16 @@ function validateRedis(check: RuntimeEnvCheck) {
   }
 }
 
-function validateGemini(check: RuntimeEnvCheck) {
-  if (hasValue(process.env.GEMINI_API_KEY)) return;
+function validateOpenAI(check: RuntimeEnvCheck) {
+  if (hasValue(process.env.OPENAI_API_KEY)) return;
 
   if (isProduction()) {
-    check.missing.push('GEMINI_API_KEY');
+    check.missing.push('OPENAI_API_KEY');
     return;
   }
 
   check.warnings.push(
-    'GEMINI_API_KEY is empty. The API will use fallback summaries.',
+    'OPENAI_API_KEY is empty. The API will use fallback summaries.',
   );
 }
 
@@ -234,7 +234,7 @@ export function validateRuntimeEnv() {
   validateJwt(check);
   validatePort(check);
   validateRedis(check);
-  validateGemini(check);
+  validateOpenAI(check);
 
   if (check.warnings.length) {
     for (const warning of check.warnings) {
