@@ -1,5 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import { colors, spacing } from '../theme/tokens';
 
 type Props = {
@@ -7,11 +6,11 @@ type Props = {
   subtitle?: string;
 };
 
-export function AppHeader({ title = 'ReadNest', subtitle }: Props) {
+export function AppHeader({ title = 'Unwind', subtitle }: Props) {
   return (
     <View style={styles.header}>
       <View style={styles.brandRow}>
-        <Ionicons name="book-outline" size={24} color={colors.primary} />
+        <Image source={require('../../assets/icon.png')} style={styles.logo} />
         <Text style={styles.brand}>{title}</Text>
       </View>
       {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
@@ -38,6 +37,11 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '800',
     letterSpacing: -0.8
+  },
+  logo: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
   },
   subtitle: {
     marginTop: spacing.xs,

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -230,7 +231,7 @@ export default function App() {
       ]);
       setUrl("");
       setPendingSharedUrl(null);
-      Alert.alert("저장 완료", "Threads URL이 ReadNest에 저장되었습니다.");
+      Alert.alert("저장 완료", "Threads URL이 Unwind에 저장되었습니다.");
       setTimeout(() => {
         void refreshArticles();
         void refreshArchiveArticles();
@@ -542,9 +543,9 @@ function AuthScreen({
   onAuthSuccess: (response: { accessToken: string; user: ApiUser }) => void;
 }) {
   const [mode, setMode] = useState<"login" | "signup">("login");
-  const [email, setEmail] = useState("readnest@example.com");
-  const [password, setPassword] = useState("ReadNest2026!");
-  const [nickname, setNickname] = useState("ReadNest");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [nickname, setNickname] = useState("Unwind");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -577,13 +578,13 @@ function AuthScreen({
     >
       <View style={styles.authCard}>
         <View style={styles.authBrandRow}>
-          <Ionicons name="book-outline" size={28} color={colors.primary} />
-          <Text style={styles.authBrand}>ReadNest</Text>
+          <Image source={require("./assets/icon.png")} style={styles.authLogo} />
+          <Text style={styles.authBrand}>Unwind</Text>
         </View>
         <Text style={styles.authTitle}>
           {mode === "login"
             ? "다시 읽을 지식을 모아두세요"
-            : "ReadNest 시작하기"}
+            : "Unwind 시작하기"}
         </Text>
         <Text style={styles.authSubtitle}>
           Threads 링크를 저장하고 날짜별로 정리합니다.
@@ -642,7 +643,6 @@ function AuthScreen({
           </Text>
         </Pressable>
 
-        <Text style={styles.apiHint}>API: {API_BASE_URL}</Text>
       </View>
     </KeyboardAvoidingView>
   );
@@ -949,7 +949,7 @@ function ThreadDetail({
         <Pressable onPress={onBack} style={styles.backButton}>
           <Ionicons name="arrow-back" size={22} color={colors.inkSoft} />
         </Pressable>
-        <Text style={styles.detailBrand}>ReadNest</Text>
+        <Text style={styles.detailBrand}>Unwind</Text>
         <View style={styles.detailHeaderSpacer} />
         <Pressable
           onPress={() => onDelete(thread)}
@@ -1236,6 +1236,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.sm,
     marginBottom: spacing.lg,
+  },
+  authLogo: {
+    width: 32,
+    height: 32,
+    borderRadius: 9,
   },
   authBrand: {
     color: colors.primary,
