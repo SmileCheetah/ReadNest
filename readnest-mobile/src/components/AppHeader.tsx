@@ -10,7 +10,7 @@ export function AppHeader({ title = 'Unwind', subtitle }: Props) {
   return (
     <View style={styles.header}>
       <View style={styles.brandRow}>
-        <Image source={require('../../assets/icon.png')} style={styles.logo} />
+        <Image source={require('../../assets/unwind-icon.png')} style={styles.logo} />
         <Text style={styles.brand}>{title}</Text>
       </View>
       {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}

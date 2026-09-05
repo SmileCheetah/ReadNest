@@ -578,7 +578,7 @@ function AuthScreen({
     >
       <View style={styles.authCard}>
         <View style={styles.authBrandRow}>
-          <Image source={require("./assets/icon.png")} style={styles.authLogo} />
+          <Image source={require("./assets/unwind-icon.png")} style={styles.authLogo} />
           <Text style={styles.authBrand}>Unwind</Text>
         </View>
         <Text style={styles.authTitle}>

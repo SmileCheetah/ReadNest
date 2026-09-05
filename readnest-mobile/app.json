@@ -6,7 +6,7 @@
     "scheme": "readnest",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/unwind-icon.png",
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -18,7 +18,7 @@
     "android": {
       "package": "com.readnest.mobile",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
+        "foregroundImage": "./assets/unwind-icon.png",
         "backgroundColor": "#f6f5f4"
       }
     },
@@ -30,7 +30,7 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#f6f5f4",
-          "image": "./assets/icon.png",
+          "image": "./assets/unwind-icon.png",
           "imageWidth": 160,
           "resizeMode": "contain"
         }
