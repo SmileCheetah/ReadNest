@@ -78,7 +78,7 @@ Content-Type: application/json
 
 {
   "email": "readnest@example.com",
-  "password": "ReadNest2026!",
+  "password": "YOUR_TEST_PASSWORD",
   "nickname": "ReadNest"
 }
 ```
@@ -91,7 +91,7 @@ Content-Type: application/json
 
 {
   "email": "readnest@example.com",
-  "password": "ReadNest2026!"
+  "password": "YOUR_TEST_PASSWORD"
 }
 ```
 

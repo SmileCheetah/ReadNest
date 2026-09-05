@@ -6,7 +6,7 @@ services:
     environment:
       MYSQL_DATABASE: readnest
       MYSQL_USER: readnest_user
-      MYSQL_PASSWORD: 'ReadNest2026!'
+      MYSQL_PASSWORD: 'YOUR_DB_PASSWORD'
       MYSQL_ROOT_PASSWORD: 'ReadNestRoot2026!'
     ports:
       - '3307:3306'

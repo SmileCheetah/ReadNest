@@ -1,6 +1,8 @@
-# ReadNest
+# Unwind
 
-SNS와 웹에서 발견한 유용한 글을 공유 한 번으로 저장하고, AI가 요약하여 날짜별 아카이브로 정리해주는 개인 지식 큐레이션 서비스입니다.
+![Unwind Play Store feature graphic](./readnest-mobile/assets/play-store-feature-graphic.jpg)
+
+Threads에서 발견한 글을 저장하고, AI로 요약해 다시 읽을 수 있도록 돕는 개인 지식 큐레이션 앱입니다.
 
 ## 문서
 
@@ -12,12 +14,13 @@ SNS와 웹에서 발견한 유용한 글을 공유 한 번으로 저장하고, A
 
 ## 현재 결정 사항
 
+- App: Unwind (`readnest-mobile`)
 - Backend: NestJS, TypeScript (`readnest-api`)
 - Database: MySQL
 - ORM: Prisma
 - Auth: JWT
 - Async jobs: Redis, BullMQ
-- AI summary: OpenAI 또는 Gemini API
+- AI summary: OpenAI Responses API (`gpt-5.6-luna`)
 - Frontend: React Native / Expo (`readnest-mobile`)
 
 ## 현재 구현 상태
@@ -26,7 +29,7 @@ SNS와 웹에서 발견한 유용한 글을 공유 한 번으로 저장하고, A
 - 사용자별 Threads URL 저장, 목록, 상세, 삭제
 - 중복 URL 방지와 읽음 상태 관리
 - Redis/BullMQ 기반 비동기 요약 큐
-- Gemini API 기반 AI 요약과 fallback 요약
+- OpenAI Responses API 기반 AI 요약과 fallback 요약
 - Playwright/fetch 기반 원문 추출
 - React Native 앱의 홈, 아카이브, 상세, 설정 화면
 - 요약 복사, OS 공유, 재시도 버튼 1차 구현
@@ -115,7 +118,7 @@ KoDeploy가 시작 명령어를 자동으로 `npm run start`로 잡아도 운영
 필수 환경변수:
 
 ```env
-DB_HOST=
+DATABASE_URL=
 DB_PORT=3306
 DB_NAME=
 DB_USER=
@@ -125,13 +128,8 @@ PORT=3000
 JWT_SECRET=
 JWT_EXPIRES_IN=7d
 REDIS_URL=
-REDIS_HOST=
-REDIS_PORT=6379
-REDIS_USERNAME=
-REDIS_PASSWORD=
-REDIS_TLS=false
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.6-luna
 DAILY_SAVE_LIMIT=50
 SUMMARY_RETRY_LIMIT=3
 PLAYWRIGHT_CHANNEL=chrome
@@ -140,7 +138,7 @@ PLAYWRIGHT_SCROLL_COUNT=3
 EXTRACT_TEXT_LIMIT=50000
 ```
 
-KoDeploy에서 MySQL 의존성을 사용하는 경우 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`만 등록하면 됩니다. 앱 시작 시 `mysql://DB_USER:DB_PASSWORD@DB_HOST:DB_PORT/DB_NAME` 형식의 `DATABASE_URL`을 자동 생성합니다.
+KoDeploy에서는 실제 비밀값을 README나 GitHub에 저장하지 말고, 대시보드의 환경변수에만 등록합니다. `DATABASE_URL` 또는 배포 플랫폼이 제공하는 DB 연결 설정을 사용합니다.
 
 다른 배포 환경이나 로컬 개발에서는 `DATABASE_URL`을 직접 넣어도 됩니다. 우선순위는 `DATABASE_URL` 직접 값, 그다음 `DB_*` 조합입니다.
 
@@ -172,8 +170,8 @@ KoDeploy가 Python용 `mysql+pymysql://...` 형식의 `DATABASE_URL`을 함께 �
 | `REDIS_USERNAME` | Redis username. 필요한 서비스에서만 사용 |
 | `REDIS_PASSWORD` | Redis password. 필요한 서비스에서만 사용 |
 | `REDIS_TLS` | Redis TLS 사용 여부. `true`이면 TLS 활성화 |
-| `GEMINI_API_KEY` | Gemini API key. 비어 있으면 fallback 요약 사용 |
-| `GEMINI_MODEL` | Gemini 요약 모델 |
+| `OPENAI_API_KEY` | 서버 전용 OpenAI API key. GitHub와 모바일 앱에 포함하지 않음 |
+| `OPENAI_MODEL` | 요약 모델. 기본값 `gpt-5.6-luna` |
 | `DAILY_SAVE_LIMIT` | 사용자별 하루 저장 제한 |
 | `SUMMARY_RETRY_LIMIT` | 요약 수동 재시도 제한 |
 | `PLAYWRIGHT_CHANNEL` | Playwright 브라우저 channel |
@@ -187,7 +185,7 @@ KoDeploy가 Python용 `mysql+pymysql://...` 형식의 `DATABASE_URL`을 함께 �
 
 | 변수 | 설명 |
 | --- | --- |
-| `EXPO_PUBLIC_API_BASE_URL` | 모바일 앱이 호출할 ReadNest API 주소 |
+| `EXPO_PUBLIC_API_BASE_URL` | 모바일 앱이 호출할 Unwind API 주소 |
 
 ## 검증 명령
 

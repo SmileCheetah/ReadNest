@@ -22,7 +22,7 @@ CREATE DATABASE IF NOT EXISTS readnest
   COLLATE utf8mb4_unicode_ci;
 
 CREATE USER IF NOT EXISTS 'readnest_user'@'localhost'
-  IDENTIFIED BY 'ReadNest2026!';
+  IDENTIFIED BY 'YOUR_DB_PASSWORD';
 
 GRANT ALL PRIVILEGES ON readnest.* TO 'readnest_user'@'localhost';
 
@@ -34,14 +34,14 @@ FLUSH PRIVILEGES;
 프로젝트 `.env`는 아래처럼 둡니다.
 
 ```env
-DATABASE_URL="mysql://readnest_user:ReadNest2026!@localhost:3306/readnest"
+DATABASE_URL="mysql://readnest_user:YOUR_DB_PASSWORD@localhost:3306/readnest"
 PORT=3000
 ```
 
 접속 확인:
 
 ```bash
-mysql -ureadnest_user -p'ReadNest2026!' -h 127.0.0.1 readnest -e "SELECT DATABASE();"
+mysql -ureadnest_user -p'YOUR_DB_PASSWORD' -h 127.0.0.1 readnest -e "SELECT DATABASE();"
 ```
 
 마이그레이션:
@@ -94,7 +94,7 @@ npm run prisma:migrate -- --name init
 Docker DB 접속 정보:
 
 ```env
-DATABASE_URL="mysql://readnest_user:ReadNest2026!@localhost:3307/readnest"
+DATABASE_URL="mysql://readnest_user:YOUR_DB_PASSWORD@localhost:3307/readnest"
 ```
 
 ## 기존 Docker 볼륨 비밀번호가 꼬인 경우

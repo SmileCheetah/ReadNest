@@ -1113,7 +1113,7 @@ cp .env.local-mysql.example .env
 
 이후 `readnest` DB와 `readnest_user` 계정을 만들어야 합니다. 자세한 내용은 `readnest-api/docs/mysql-setup.md`에 기록했습니다.
 
-로컬 MySQL의 비밀번호 정책 때문에 기존 예시 비밀번호 `readnest_password`가 거절되었습니다. 예시 비밀번호를 `ReadNest2026!`로 변경했습니다.
+로컬 MySQL의 비밀번호 정책 때문에 기존 예시 비밀번호가 거절되었습니다. 예시 비밀번호는 문서에 실제 값을 저장하지 않고 `YOUR_DB_PASSWORD` 자리표시자를 사용합니다.
 
 Prisma Migrate는 개발 환경에서 shadow database를 만들기 때문에 `readnest_user`에 `CREATE`, `DROP`, `ALTER`, `REFERENCES` 전역 권한이 추가로 필요합니다. 관련 내용은 `readnest-api/docs/mysql-setup.md`에 기록했습니다.
 

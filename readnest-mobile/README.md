@@ -1,6 +1,6 @@
-# ReadNest Mobile
+# Unwind Mobile
 
-Threads 저장과 AI 요약 흐름을 확인하기 위한 React Native 앱 프론트입니다.
+Threads 글 저장과 AI 요약을 제공하는 Unwind React Native 앱입니다.
 
 현재 Expo SDK 57과 EAS Build로 Android API 36 배포를 지원합니다. Android preview/production 배포 상태와 명령은 [`../docs/ANDROID_RELEASE.md`](../docs/ANDROID_RELEASE.md)를 참고합니다.
 
@@ -23,7 +23,7 @@ Expo Go 앱으로 QR 코드를 스캔하면 모바일에서 확인할 수 있습
 
 ## API 연결
 
-현재 앱은 ReadNest API와 직접 통신합니다.
+현재 앱은 Unwind API와 직접 통신합니다.
 
 기본 API 주소:
 
@@ -79,7 +79,7 @@ Expo Go에서는 네이티브 공유 시트 수신을 완전히 검증하기 어
 
 ## Development Build / OS Share 준비
 
-OS 공유 시트에서 ReadNest를 직접 선택하는 흐름은 Expo Go만으로는 완성 검증이 어렵습니다.
+OS 공유 시트에서 Unwind를 직접 선택하는 흐름은 Expo Go만으로는 완성 검증이 어렵습니다.
 
 현재 준비된 항목:
 
