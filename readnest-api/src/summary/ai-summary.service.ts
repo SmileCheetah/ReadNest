@@ -17,6 +17,7 @@ export type StructuredSummaryResult = {
   oneLineSummary: string;
   coreSummary: string;
   keyPoints: string[];
+  conclusion: string;
   tags: string[];
   readingValue: string;
   caution: string;
@@ -51,9 +52,8 @@ export class AiSummaryService {
       const response = await this.client.responses.create({
         model: this.model,
         input: [
-          '너는 ReadNest의 콘텐츠 요약 엔진이다.',
-          'ReadNest는 사용자가 SNS와 웹에서 발견한 글을 저장하면 AI가 내용을 요약하고 날짜별 아카이브로 정리해주는 개인 지식 큐레이션 서비스다.',
-          '너의 역할은 원문을 짧게 줄이는 것이 아니라 사용자가 나중에 다시 읽기 좋도록 핵심 의미를 구조화하는 것이다.',
+          '너는 Unwind의 콘텐츠 요약 엔진이다.',
+          '너의 역할은 원문에 충실하게 내용을 압축하는 것이다. 원문에 없는 해석, 평가, 활용 제안은 추가하지 않는다.',
           '반드시 자연스러운 한국어 JSON만 반환한다.',
           '',
           '# 입력 데이터',
@@ -66,11 +66,12 @@ export class AiSummaryService {
           '# 핵심 원칙',
           '원문에 없는 내용을 지어내지 않는다.',
           '확실하지 않은 내용은 단정하지 않는다.',
-          '글의 성격에 맞는 요약 방식을 선택한다.',
-          '요약은 짧고 명확하게 작성한다.',
-          '핵심 포인트는 중복되지 않게 작성한다.',
-          '사용자가 원문을 다시 읽을지 판단할 수 있도록 읽을 가치를 알려준다.',
-          '투자, 건강, 법률, 정치처럼 민감한 주제는 주의점을 반드시 포함한다.',
+          '핵심 주장, 근거, 주요 항목, 결론의 원문 흐름을 유지한다.',
+          '원문에 제시된 숫자, 분류 체계, 항목 순서, 단계 수를 그대로 보존한다.',
+          '사례와 반복은 줄이되 각 항목의 판단 기준과 인과관계는 남긴다.',
+          '전체 출력 분량은 원문 분량의 20~30% 이내를 목표로 한다.',
+          '핵심 키워드는 요약의 주요 항목 수와 같은 개수로 작성한다.',
+          'readingValue와 caution은 원문에 명시된 내용이 없으면 빈 문자열로 둔다.',
           '연속 글 일부만 저장된 경우 전체 내용을 단정하지 않는다.',
           '',
           '# 요약 유형',
@@ -78,13 +79,14 @@ export class AiSummaryService {
           '',
           '# 출력 JSON 필드',
           'summaryType: 요약 유형',
-          'title: 원문 제목을 다듬거나 30자 안팎으로 생성',
+          'title: 원문의 메시지와 어조가 드러나는 제목',
           'oneLineSummary: 목록에서 보여줄 수 있는 한 문장 요약',
-          'coreSummary: 최대 3문장 핵심 요약. 배경, 핵심 주장, 결론이 자연스럽게 이어져야 한다.',
-          'keyPoints: 기본 3개, 긴 글이나 연속 글이면 최대 5개. 번호형 Thread는 1., 2. 형식으로 주장 흐름을 보존한다.',
-          'tags: 3개에서 5개',
-          'readingValue: 이 글을 왜 저장할 만한지 활용 관점으로 설명',
-          'caution: 민감 주제는 주의점, 일반 글은 간단한 확인 관점',
+          'coreSummary: 핵심 주장. 원문의 주장과 근거를 1~3문장으로 정리',
+          'keyPoints: 원문의 주요 항목을 원래 순서대로 각각 1~2문장으로 정리. 번호와 분류 체계를 보존한다.',
+          'conclusion: 원문의 결론을 1~2문장으로 정리. 원문에 결론이 없으면 빈 문자열',
+          'tags: keyPoints와 같은 개수의 핵심 키워드',
+          'readingValue: 원문에 명시된 효용이나 읽을 이유. 없으면 빈 문자열',
+          'caution: 원문에 명시된 주의점. 없으면 빈 문자열',
           'contextStatus: 완결, 맥락 부족, 부분 요약, 불명확 중 하나',
           'threadStatus: 전체 포함 9 of 9, 일부 포함, 해당 없음 같은 형태',
           'confidence: 0에서 1 사이 숫자',
@@ -112,6 +114,7 @@ export class AiSummaryService {
                 type: 'array',
                 items: { type: 'string' },
               },
+              conclusion: { type: 'string' },
               tags: {
                 type: 'array',
                 items: { type: 'string' },
@@ -128,6 +131,7 @@ export class AiSummaryService {
               'oneLineSummary',
               'coreSummary',
               'keyPoints',
+              'conclusion',
               'tags',
               'readingValue',
               'caution',
@@ -169,24 +173,32 @@ export class AiSummaryService {
       summary: hasText
         ? [
             '요약 유형: 기타',
+            `제목: ${title}`,
             `한 줄 요약: ${title}에 대한 저장글입니다.`,
             '',
-            '핵심 요약: OpenAI API 키가 설정되면 원문 의미를 구조화한 요약으로 자동 생성됩니다.',
+            '핵심 주장: OpenAI API 키가 설정되면 원문 의미를 구조화한 요약으로 자동 생성됩니다.',
+            '주요 내용:',
+            ...this.createFallbackKeyPoints(input.text).map(
+              (point, index) => `${index + 1}. ${point}`,
+            ),
             '',
-            '읽을 가치: 저장한 원문을 나중에 다시 검토할 수 있도록 보관되었습니다.',
-            '주의점: 현재는 AI 요약 대신 fallback 요약이 저장되었습니다.',
+            '결론: 현재는 AI 요약 대신 fallback 요약이 저장되었습니다.',
+            '핵심 키워드: Threads, 요약대기',
             '맥락 상태: 완결',
             '연속 글 상태: unknown',
             '요약 신뢰도: 0.4',
           ].join('\n')
         : [
             '요약 유형: 기타',
+            `제목: ${title}`,
             '한 줄 요약: 원문을 충분히 가져오지 못했습니다.',
             '',
-            '핵심 요약: URL과 메타데이터를 기준으로 저장되었으며 추가 맥락이 필요할 수 있습니다.',
+            '핵심 주장: URL과 메타데이터만 확인되어 원문의 핵심 주장을 판단할 수 없습니다.',
+            '주요 내용:',
+            '1. 원문 정보 부족',
             '',
-            '읽을 가치: 원문 링크를 보관했다는 점에서 다시 확인할 수 있습니다.',
-            '주의점: 본문 정보가 부족해 요약 정확도가 낮습니다.',
+            '결론: 추가 원문 맥락이 필요합니다.',
+            '핵심 키워드: Threads',
             '맥락 상태: 불명확',
             '연속 글 상태: unknown',
             '요약 신뢰도: 0.2',
@@ -209,13 +221,19 @@ export class AiSummaryService {
     return {
       title: result.title || input.title || this.createTitleFromUrl(input.url),
       summary: [
-        `요약 유형: ${result.summaryType}`,
+        `제목: ${result.title || input.title || this.createTitleFromUrl(input.url)}`,
         `한 줄 요약: ${result.oneLineSummary}`,
         '',
-        `핵심 요약: ${result.coreSummary}`,
+        `핵심 주장: ${result.coreSummary}`,
         '',
-        `읽을 가치: ${result.readingValue}`,
-        `주의점: ${result.caution}`,
+        '주요 내용:',
+        ...result.keyPoints.slice(0, 5).map(
+          (point, index) => `${index + 1}. ${point}`,
+        ),
+        '',
+        `결론: ${result.conclusion}`,
+        `핵심 키워드: ${result.tags.slice(0, 5).join(', ')}`,
+        `요약 유형: ${result.summaryType}`,
         `맥락 상태: ${result.contextStatus}`,
         `연속 글 상태: ${result.threadStatus}`,
         `요약 신뢰도: ${confidence}`,
@@ -246,6 +264,7 @@ export class AiSummaryService {
         oneLineSummary: '원문을 충분히 가져오지 못했습니다.',
         coreSummary:
           'URL과 메타데이터를 기준으로 저장되었으며 추가 맥락이 필요할 수 있습니다.',
+        conclusion: '추가 원문 맥락이 필요합니다.',
         keyPoints: [
           'URL 저장 완료',
           '원문 추출 제한 감지',
@@ -266,6 +285,7 @@ export class AiSummaryService {
       oneLineSummary: `${title}에 대한 저장글입니다.`,
       coreSummary:
         'OpenAI API 키가 설정되면 원문 의미를 구조화한 요약으로 자동 생성됩니다.',
+      conclusion: '현재는 AI 요약 대신 fallback 요약이 저장되었습니다.',
       keyPoints: this.createFallbackKeyPoints(input.text),
       tags: ['Threads', 'ReadNest', '요약대기'],
       readingValue:
