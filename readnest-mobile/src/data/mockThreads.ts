@@ -13,6 +13,7 @@ export type SavedThread = {
   summary: string;
   summaryMeta?: {
     summaryType: string;
+    title?: string;
     oneLineSummary: string;
     coreSummary: string;
     readingValue: string;

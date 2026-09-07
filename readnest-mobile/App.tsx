@@ -25,6 +25,7 @@ import { mapArticleToThread } from "./src/api/articleMapper";
 import { AppHeader } from "./src/components/AppHeader";
 import { BottomNav } from "./src/components/BottomNav";
 import { ThreadCard } from "./src/components/ThreadCard";
+import { ThreadDetailScreen } from "./src/screens/ThreadDetailScreen";
 import { SavedThread } from "./src/data/mockThreads";
 import { colors, radius, shadow, spacing } from "./src/theme/tokens";
 
@@ -446,7 +447,7 @@ export default function App() {
       <SafeAreaView style={styles.safeArea}>
         <StatusBar style="dark" />
         {selectedThread ? (
-          <ThreadDetail
+          <ThreadDetailScreen
             thread={selectedThread}
             onBack={() => setSelectedThread(null)}
             onToggleReadStatus={updateThreadReadStatus}

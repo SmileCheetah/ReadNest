@@ -1,0 +1,90 @@
+import { useState } from "react";
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
+import { Ionicons } from "@expo/vector-icons";
+import type { SavedThread } from "../data/mockThreads";
+import { colors, radius, spacing } from "../theme/tokens";
+
+type Props = {
+  thread: SavedThread;
+  onBack: () => void;
+  onToggleReadStatus: (thread: SavedThread) => void;
+  onMarkReadLater: (thread: SavedThread) => void;
+  onRetrySummary: (thread: SavedThread) => void;
+  onCopySummary?: (thread: SavedThread) => void;
+  onShareSummary: (thread: SavedThread) => void;
+  onDelete: (thread: SavedThread) => void;
+};
+
+function clean(value: string) {
+  return value.replace(/\*{1,3}/g, "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function CollapsibleSection({ title, children }: { title: string; children: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <View style={styles.collapsible}>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded }} accessibilityLabel={`${title} ${expanded ? "접기" : "펼치기"}`} hitSlop={8} style={styles.collapseTrigger} onPress={() => setExpanded((value) => !value)}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={20} color={colors.inkSoft} />
+      </Pressable>
+      {expanded ? <Text style={styles.body}>{clean(children)}</Text> : null}
+    </View>
+  );
+}
+
+export function ThreadDetailScreen({ thread, onBack, onToggleReadStatus, onMarkReadLater, onRetrySummary, onShareSummary, onDelete }: Props) {
+  const [showSource, setShowSource] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const meta = thread.summaryMeta;
+  const originalUrl = thread.originalUrl?.trim();
+  const points = thread.keyPoints.filter((point) => point.trim()).slice(0, 3);
+  const oneLine = meta?.oneLineSummary?.trim() || clean(thread.summary);
+  const core = meta?.coreSummary?.trim();
+  const remainingPoints = thread.keyPoints.filter((point) => point.trim()).slice(3);
+  const canRetry = thread.processStatus === "SUMMARY_FAILED" || thread.processStatus === "CONTEXT_INSUFFICIENT";
+  const copy = async () => {
+    if (copied) return;
+    await Clipboard.setStringAsync([oneLine, ...points].filter(Boolean).join("\n\n"));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  const more = () => Alert.alert("더보기", undefined, [
+    { text: thread.readStatus === "READ" ? "안 읽음 표시" : "읽음 표시", onPress: () => onToggleReadStatus(thread) },
+    { text: "나중에 보기", onPress: () => onMarkReadLater(thread) },
+    { text: "원문 소스 보기", onPress: () => setShowSource(true) },
+    { text: "공유", onPress: () => onShareSummary(thread) },
+    ...(canRetry ? [{ text: "요약 재시도", onPress: () => onRetrySummary(thread) }] : []),
+    { text: "삭제", style: "destructive" as const, onPress: () => onDelete(thread) },
+    { text: "취소", style: "cancel" as const },
+  ]);
+  return <View style={styles.root}>
+    <View style={styles.appbar}>
+      <Pressable accessibilityRole="button" accessibilityLabel="뒤로가기" style={styles.iconButton} onPress={onBack}><Ionicons name="arrow-back" size={22} color={colors.inkSoft} /></Pressable>
+      <Text style={styles.brand}>Unwind</Text><View style={styles.spacer} />
+      <Pressable accessibilityRole="button" accessibilityLabel={copied ? "복사됨" : "요약 복사"} style={styles.iconButton} onPress={() => void copy()}><Ionicons name={copied ? "checkmark" : "copy-outline"} size={21} color={colors.primary} /></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="더보기" style={styles.iconButton} onPress={more}><Ionicons name="ellipsis-horizontal" size={23} color={colors.inkSoft} /></Pressable>
+    </View>
+    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <Text style={styles.metaLine}>Threads · {thread.savedDateLabel} 저장</Text>
+      <Text numberOfLines={3} style={styles.title}>{meta?.title?.trim() || thread.title || "제목 없음"}</Text>
+      <View style={styles.card}>
+        <View style={styles.summaryHeader}><Ionicons name="sparkles-outline" size={20} color={colors.primary} /><Text style={styles.summaryHeaderText}>AI 요약</Text><View style={styles.spacer} /><Pressable accessibilityRole="button" accessibilityLabel={copied ? "복사됨" : "요약 복사"} style={styles.copyButton} onPress={() => void copy()}><Text style={styles.copyText}>{copied ? "✓ 복사됨" : "복사"}</Text></Pressable></View>
+        <Text style={styles.sectionTitle}>핵심 한 줄 요약</Text><Text style={styles.heroText}>{oneLine}</Text>
+        {points.length ? <View style={styles.points}>{points.map((point, index) => <View key={`${point}-${index}`} style={styles.point}><Text style={styles.number}>{index + 1}</Text><Text style={styles.body}>{clean(point)}</Text></View>)}</View> : null}
+        {originalUrl ? <Pressable accessibilityRole="button" accessibilityLabel="원문 보기" style={styles.primaryCta} onPress={() => void Linking.openURL(originalUrl)}><Text style={styles.primaryCtaText}>원문 보기</Text><Ionicons name="open-outline" size={18} color={colors.surface} /></Pressable> : <Text style={styles.disabledCta}>원문 링크가 없습니다.</Text>}
+      </View>
+      {thread.processStatus === "SUMMARIZING" ? <Text style={styles.notice}>요약을 생성하는 중입니다.</Text> : null}
+      {thread.processStatus === "SUMMARY_FAILED" ? <Text style={styles.notice}>요약을 생성하지 못했습니다. 더보기에서 다시 시도할 수 있습니다.</Text> : null}
+      {thread.processStatus === "CONTEXT_INSUFFICIENT" ? <Text style={styles.notice}>일부 원문이 누락되었을 수 있습니다.</Text> : null}
+      {core || remainingPoints.length ? <CollapsibleSection title="자세한 요약" children={[core, ...remainingPoints].filter(Boolean).join("\n\n")} /> : null}
+      {thread.tags.length ? <View style={styles.tags}>{thread.tags.slice(0, 3).map((tag) => <Text key={tag} style={styles.tag}>#{tag}</Text>)}</View> : null}
+      {meta ? <CollapsibleSection title="분석 정보" children={[`맥락 상태: ${meta.contextStatus}`, meta.caution].filter(Boolean).join("\n\n")} /> : null}
+      {showSource ? <View style={styles.source}><Text style={styles.sectionTitle}>요약에 사용된 원문</Text><Text selectable style={styles.body}>{thread.rawText || "저장된 원문이 없습니다."}</Text></View> : null}
+    </ScrollView>
+  </View>;
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.canvas }, appbar: { height: 56, flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.sm, backgroundColor: colors.paper, borderBottomWidth: 1, borderBottomColor: colors.hairline }, iconButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" }, brand: { color: colors.primary, fontSize: 22, fontWeight: "800" }, spacer: { flex: 1 }, content: { padding: spacing.lg, paddingBottom: spacing.xl }, metaLine: { color: colors.muted, fontSize: 13, marginBottom: spacing.sm }, title: { color: colors.ink, fontSize: 29, lineHeight: 37, fontWeight: "700", letterSpacing: -0.6, marginBottom: spacing.lg }, card: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, borderWidth: 1, borderColor: colors.hairline }, summaryHeader: { flexDirection: "row", alignItems: "center", marginBottom: spacing.lg }, summaryHeaderText: { color: colors.primary, fontSize: 18, fontWeight: "800", marginLeft: spacing.sm }, copyButton: { minWidth: 44, minHeight: 44, justifyContent: "center", alignItems: "center" }, copyText: { color: colors.primary, fontWeight: "800" }, sectionTitle: { color: colors.ink, fontSize: 16, lineHeight: 23, fontWeight: "800", marginBottom: spacing.xs }, heroText: { color: colors.ink, fontSize: 17, lineHeight: 26, marginBottom: spacing.md }, points: { marginBottom: spacing.md }, point: { flexDirection: "row", alignItems: "flex-start", marginBottom: spacing.sm }, number: { color: colors.primary, fontSize: 15, fontWeight: "800", width: 26, lineHeight: 24 }, body: { flex: 1, color: colors.ink, fontSize: 15, lineHeight: 24 }, primaryCta: { minHeight: 48, borderRadius: radius.pill, backgroundColor: colors.primary, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: spacing.sm, marginTop: spacing.sm }, primaryCtaText: { color: colors.surface, fontSize: 15, fontWeight: "800" }, disabledCta: { color: colors.muted, textAlign: "center", marginTop: spacing.md }, notice: { color: colors.inkSoft, backgroundColor: colors.surfaceMid, padding: spacing.md, borderRadius: radius.md, marginTop: spacing.md, lineHeight: 21 }, collapsible: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, marginTop: spacing.md, borderWidth: 1, borderColor: colors.hairline }, collapseTrigger: { minHeight: 44, flexDirection: "row", alignItems: "center" }, tags: { flexDirection: "row", gap: spacing.sm, flexWrap: "wrap", marginTop: spacing.lg }, tag: { color: colors.muted, borderWidth: 1, borderColor: colors.hairline, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 7 }, source: { backgroundColor: colors.surface, padding: spacing.md, borderRadius: radius.lg, marginTop: spacing.md },
+});
