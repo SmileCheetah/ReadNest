@@ -537,6 +537,39 @@ function formatThreadShareText(thread: SavedThread) {
     .join("\n");
 }
 
+function cleanSummaryText(value: string) {
+  return value
+    .replace(/\*{1,3}/g, "")
+    .replace(/^\s*[-•]\s*/gm, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function SummarySection({ title, children, emphasis = false }: {
+  title: string;
+  children: string;
+  emphasis?: boolean;
+}) {
+  const paragraphs = cleanSummaryText(children)
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+
+  return (
+    <View style={emphasis ? styles.oneLineSummary : styles.summarySection}>
+      <Text style={emphasis ? styles.oneLineSummaryTitle : styles.summarySectionTitle}>
+        {title}
+      </Text>
+      {paragraphs.map((paragraph, index) => (
+        <Text key={`${title}-${index}`} style={emphasis ? styles.oneLineSummaryText : styles.summaryBodyText}>
+          {paragraph}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
 function AuthScreen({
   onAuthSuccess,
 }: {
@@ -1128,7 +1161,18 @@ function ThreadDetail({
               />
               <Text style={styles.summaryTitle}>AI 요약</Text>
             </View>
-            <Text style={styles.summaryText}>{thread.summary}</Text>
+            {thread.summaryMeta ? (
+              <>
+                <SummarySection title="핵심 내용" children={thread.summaryMeta.coreSummary} />
+                <SummarySection
+                  title="핵심 한 줄 요약"
+                  children={thread.summaryMeta.oneLineSummary}
+                  emphasis
+                />
+              </>
+            ) : (
+              <Text style={styles.summaryBodyText}>{cleanSummaryText(thread.summary)}</Text>
+            )}
           </View>
 
         </View>
@@ -1816,6 +1860,41 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 16,
     lineHeight: 25,
+  },
+  summarySection: {
+    marginTop: spacing.sm,
+  },
+  summarySectionTitle: {
+    color: colors.ink,
+    fontSize: 16,
+    lineHeight: 23,
+    fontWeight: "800",
+    marginBottom: spacing.xs,
+  },
+  summaryBodyText: {
+    color: colors.ink,
+    fontSize: 15,
+    lineHeight: 24,
+    marginBottom: spacing.sm,
+  },
+  oneLineSummary: {
+    backgroundColor: colors.surfaceLow,
+    borderRadius: radius.md,
+    marginTop: spacing.md,
+    padding: spacing.md,
+  },
+  oneLineSummaryTitle: {
+    color: colors.primary,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "800",
+    marginBottom: spacing.xs,
+  },
+  oneLineSummaryText: {
+    color: colors.ink,
+    fontSize: 15,
+    lineHeight: 23,
+    fontWeight: "700",
   },
   divider: {
     height: 1,
