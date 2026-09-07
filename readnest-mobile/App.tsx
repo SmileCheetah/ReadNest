@@ -1131,15 +1131,6 @@ function ThreadDetail({
             <Text style={styles.summaryText}>{thread.summary}</Text>
           </View>
 
-          <View style={styles.divider} />
-
-          <Text style={styles.keyPointTitle}>주요 포인트</Text>
-          {thread.keyPoints.map((point) => (
-            <View key={point} style={styles.keyPointRow}>
-              <View style={styles.bullet} />
-              <Text style={styles.keyPointText}>{point}</Text>
-            </View>
-          ))}
         </View>
       </ScrollView>
     </View>
