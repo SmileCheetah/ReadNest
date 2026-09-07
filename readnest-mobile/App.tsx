@@ -453,7 +453,6 @@ export default function App() {
             onToggleReadStatus={updateThreadReadStatus}
             onMarkReadLater={markThreadReadLater}
             onRetrySummary={retryThreadSummary}
-            onCopySummary={copyThreadSummary}
             onShareSummary={shareThreadSummary}
             onDelete={deleteThread}
           />
