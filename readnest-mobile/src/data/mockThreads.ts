@@ -9,6 +9,7 @@ export type ReadStatus = "UNREAD" | "READ" | "READ_LATER";
 export type SavedThread = {
   id: string;
   title: string;
+  rawText?: string | null;
   summary: string;
   summaryMeta?: {
     summaryType: string;

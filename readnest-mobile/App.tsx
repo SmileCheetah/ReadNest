@@ -939,6 +939,7 @@ function ThreadDetail({
   onShareSummary: (thread: SavedThread) => void;
   onDelete: (thread: SavedThread) => void;
 }) {
+  const [showSource, setShowSource] = useState(false);
   const canRetry =
     thread.processStatus === "SUMMARY_FAILED" ||
     thread.processStatus === "CONTEXT_INSUFFICIENT";
@@ -1022,6 +1023,20 @@ function ThreadDetail({
           </Pressable>
           <Pressable
             style={styles.secondaryPill}
+            onPress={() => {
+              if (thread.rawText?.trim()) {
+                setShowSource((visible) => !visible);
+              } else {
+                Alert.alert("원문 없음", "요약에 사용된 원문이 아직 저장되지 않았습니다.");
+              }
+            }}
+          >
+            <Text style={styles.secondaryPillText}>
+              {showSource ? "원문 닫기" : "원문 소스"}
+            </Text>
+          </Pressable>
+          <Pressable
+            style={styles.secondaryPill}
             onPress={() => onCopySummary(thread)}
           >
             <Text style={styles.secondaryPillText}>요약 복사</Text>
@@ -1088,6 +1103,18 @@ function ThreadDetail({
               color={colors.red}
             />
             <Text style={styles.warningText}>{thread.lastSummaryError}</Text>
+          </View>
+        ) : null}
+
+        {showSource ? (
+          <View style={styles.sourceCard}>
+            <Text style={styles.sourceTitle}>요약에 사용된 원문</Text>
+            <Text style={styles.sourceMeta}>
+              서버에서 실제로 추출·저장한 텍스트입니다.
+            </Text>
+            <Text selectable style={styles.sourceText}>
+              {thread.rawText}
+            </Text>
           </View>
         ) : null}
 
@@ -1567,6 +1594,31 @@ const styles = StyleSheet.create({
   detailContent: {
     padding: spacing.lg,
     paddingBottom: spacing.xl,
+  },
+  sourceCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.hairline,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  sourceTitle: {
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "800",
+    marginBottom: spacing.xs,
+  },
+  sourceMeta: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: spacing.md,
+  },
+  sourceText: {
+    color: colors.ink,
+    fontSize: 14,
+    lineHeight: 23,
   },
   metaLine: {
     flexDirection: "row",

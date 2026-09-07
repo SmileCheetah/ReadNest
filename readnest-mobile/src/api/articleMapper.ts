@@ -36,6 +36,7 @@ export function mapArticleToThread(article: ApiArticle): SavedThread {
   return {
     id: article.id,
     title: article.title ?? "제목을 가져오는 중",
+    rawText: article.rawText,
     summary:
       article.summary ??
       "아직 요약이 생성되지 않았습니다. 요약 큐 연결 후 자동으로 채워질 예정입니다.",
