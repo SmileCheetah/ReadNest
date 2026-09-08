@@ -342,3 +342,28 @@ SUMMARIZING
 대조·메시지는 짧은 blockquote로 표시한다. 짧은 글이나 단일 주장에는 이 구조를
 강제하지 않는다. 기존 저장 요약은 자동 재생성하지 않으며 사용자의 재요약 요청부터
 새 프롬프트를 적용한다.
+
+## 15. 구조화 응답 + 결정론적 Markdown builder 결정 (2026-09-09)
+
+### 문제
+
+모델이 최종 Markdown까지 자유롭게 생성하면 원문보다 장황해지고, heading·목록·인용문의
+밀도가 글마다 흔들린다.
+
+### 가능한 선택지
+
+1. 모델 자유 Markdown을 유지한다.
+2. 생성된 문자열을 사후 정규식으로 수정한다.
+3. 모델은 구조화된 `SummaryDocument`를 반환하고 Backend가 Markdown을 조립한다.
+
+### 선택한 방법
+
+3번을 선택한다. 내부 OpenAI 응답은 `style`, `coreClaim`, `sectionTitle`, `items`,
+`conclusion`, `takeaway`를 반환한다. 공개 API의 `summaryMeta.summaryMarkdown`은
+Backend builder가 생성한다.
+
+### 선택 이유와 트레이드오프
+
+번호·문단·빈 섹션·허용 Markdown을 서버가 일관되게 통제할 수 있고 V1/V2 공개 계약은
+변하지 않는다. 반면 모델의 자유로운 레이아웃 표현은 줄어든다. Unwind의 핵심 압축형
+요약에는 이 제약이 적합하다.
