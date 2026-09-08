@@ -322,3 +322,9 @@ SUMMARIZING
 - 빈 줄로 분리된 목록도 각 항목의 원래 번호를 유지한다. 따라서 `2.`, `3.`으로 시작하는 입력은 화면에서도 동일한 번호를 사용한다.
 - 정확히 `숫자. **짧은 제목**`만 단독으로 있는 legacy line은 목록이 아닌 h3로 표시한다. 그 외 ordered list는 일반 목록으로 보존한다.
 - V2 상세 문서는 V1 요약 카드와 분리해 카드 배경 없이 문서 흐름으로 표시한다. V1 데이터는 기존 카드와 fallback을 유지한다.
+
+## Parser 회귀 테스트 결정
+
+- `parseMarkdown`은 ordered list의 원본 marker를 보존하고, renderer가 index로 번호를 재생성하지 않는다.
+- `숫자. **짧은 제목**` 단독 줄은 marker를 포함한 h3 텍스트로 변환해 legacy 데이터의 순서 정보를 보존한다.
+- 모바일 테스트 러너가 없었으므로 Expo 호환 `jest`/`jest-expo`와 `@types/jest`를 최소 dev dependency로 추가하고 parser 단위 테스트를 실행한다.

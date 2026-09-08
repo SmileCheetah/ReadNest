@@ -38,8 +38,8 @@ export function parseMarkdown(markdown: string): Block[] {
     if (!line) { flush(); flushList(); flushQuote(); continue; }
     const heading = line.match(/^(#{2,3})\s+(.+)$/);
     if (heading) { flush(); flushList(); flushQuote(); blocks.push({ type: "heading", level: heading[1].length, text: heading[2] }); continue; }
-    const numberedHeading = line.match(/^\d+\.\s+(\*\*[^*]+\*\*)$/);
-    if (numberedHeading) { flush(); flushList(); flushQuote(); blocks.push({ type: "heading", level: 3, text: numberedHeading[1] }); continue; }
+    const numberedHeading = line.match(/^(\d+)\.\s+(\*\*[^*]+\*\*)$/);
+    if (numberedHeading) { flush(); flushList(); flushQuote(); blocks.push({ type: "heading", level: 3, text: `${numberedHeading[1]}. ${numberedHeading[2]}` }); continue; }
     const ordered = line.match(/^(\d+)[.)]\s+(.+)$/);
     const unordered = line.match(/^[-*•]\s+(.+)$/);
     if (ordered || unordered) { flush(); flushQuote(); const type = ordered ? "ol" : "ul"; if (!list || list.type !== type) { flushList(); list = { type, items: [] }; } list.items.push(ordered ? { marker: ordered[1], text: ordered[2] } : { text: unordered?.[1] ?? "" }); continue; }
