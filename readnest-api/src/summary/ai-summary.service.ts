@@ -293,8 +293,12 @@ export class AiSummaryService {
       !Array.isArray(result.tags)
     )
       return this.createFallbackSummary(input);
+    const legacyFields = { ...result };
+    delete legacyFields.summaryMarkdown;
+    delete legacyFields.schemaVersion;
     const normalized = {
-      ...result,
+      ...legacyFields,
+      schemaVersion: 1,
       summaryType: result.summaryType ?? '기타',
       conclusion: result.conclusion ?? '',
       readingValue: result.readingValue ?? '',

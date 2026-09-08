@@ -76,6 +76,8 @@ describe('summary compatibility normalization', () => {
     expect(result.keyPoints).toEqual(structured.keyPoints);
     expect(result.summary).toContain(structured.oneLineSummary);
     expect(result.summary).not.toContain('<script>');
+    expect(result.meta.schemaVersion).toBe(1);
+    expect(result.meta.summaryMarkdown).toBeUndefined();
   });
 
   it('preserves the Python golden-meaning fixture', () => {
