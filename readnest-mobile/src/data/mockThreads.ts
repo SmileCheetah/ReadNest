@@ -12,6 +12,8 @@ export type SavedThread = {
   rawText?: string | null;
   summary: string;
   summaryMeta?: {
+    schemaVersion?: number;
+    summaryMarkdown?: string;
     summaryType: string;
     title?: string;
     oneLineSummary: string;

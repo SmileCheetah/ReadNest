@@ -306,3 +306,12 @@ SUMMARIZING
 - V1 데이터와 구버전 앱이 정상 동작한다.
 - 지원하지 않는 HTML과 위험 링크가 실행되지 않는다.
 - Backend fixture와 Frontend fixture가 동일한 API 계약을 사용한다.
+
+## 13. Mobile Phase 1 결정사항
+
+- React Native Markdown 라이브러리는 추가하지 않고, 계약에 정의된 subset을 직접 React Native 컴포넌트로 렌더링한다.
+- renderer는 `##`/`###` heading, paragraph, `**bold**`, ordered/unordered list, blockquote와 soft/hard break만 지원한다.
+- raw HTML, 이미지, iframe, 표, 코드 펜스, 자동 링크와 임의 style은 렌더링하지 않는다.
+- `schemaVersion === 2`이고 `summaryMarkdown`이 비어 있지 않은 문자열일 때만 V2 renderer를 사용한다. 그 외에는 V1 필드와 레거시 `summary`로 fallback한다.
+- 상세 화면은 `summaryMarkdown` 전체를 표시하되 긴 문서는 문단 경계에서 접는다. 목록 화면과 홈 카드는 기존 `oneLineSummary`를 유지한다.
+- 복사는 V2 Markdown 전체와 원문 URL을 포함하고, V1은 기존 일반 텍스트 형식을 유지한다.

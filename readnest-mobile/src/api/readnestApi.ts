@@ -28,7 +28,7 @@ export type AuthResponse = {
   user: ApiUser;
 };
 
-export type ApiSummaryMeta = {
+type ApiSummaryMetaV1 = {
   summaryType: string;
   title: string;
   oneLineSummary: string;
@@ -41,6 +41,13 @@ export type ApiSummaryMeta = {
   threadStatus: string;
   confidence: number;
 };
+
+export type ApiSummaryMetaV2 = ApiSummaryMetaV1 & {
+  schemaVersion: 2;
+  summaryMarkdown: string;
+};
+
+export type ApiSummaryMeta = ApiSummaryMetaV1 | ApiSummaryMetaV2;
 
 export type ApiArticle = {
   id: string;

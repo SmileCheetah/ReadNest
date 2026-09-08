@@ -17,7 +17,8 @@ export const colors = {
   amberSoft: '#fff8e1',
   amber: '#ff8f00',
   redSoft: '#ffebee',
-  red: '#ba1a1a'
+  red: '#ba1a1a',
+  overlay: 'rgba(0,0,0,0.35)'
 };
 
 export const spacing = {
