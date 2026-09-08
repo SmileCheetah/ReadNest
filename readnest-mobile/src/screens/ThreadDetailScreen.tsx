@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Alert, BackHandler, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { AccessibilityInfo, Alert, BackHandler, findNodeHandle, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
 import type { SavedThread } from "../data/mockThreads";
@@ -67,7 +67,8 @@ export function ThreadDetailScreen({ thread, onBack, onToggleReadStatus, onMarkR
   useEffect(() => {
     if (!menuOpen) return;
     const focusTimer = setTimeout(() => {
-      if (menuRef.current) AccessibilityInfo.setAccessibilityFocus(menuRef.current as unknown as number);
+      const nodeHandle = findNodeHandle(menuRef.current);
+      if (nodeHandle !== null) AccessibilityInfo.setAccessibilityFocus(nodeHandle);
     }, 100);
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => { setMenuOpen(false); return true; });
     return () => { clearTimeout(focusTimer); subscription.remove(); };
