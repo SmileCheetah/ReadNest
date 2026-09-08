@@ -78,4 +78,14 @@ describe('summary compatibility normalization', () => {
     expect(structured.keyPoints.join(' ')).toContain('C/C++·CUDA');
     expect(structured.conclusion).toContain('생태계와 네트워크 효과');
   });
+
+  it.each(['timeout', '429', '500'])('uses fallback when OpenAI returns %s', async (kind) => {
+    const failing = Object.create(AiSummaryService.prototype) as any;
+    failing.logger = { warn: jest.fn() };
+    failing.client = { responses: { create: jest.fn().mockRejectedValue(new Error(`OpenAI ${kind}`)) } };
+    failing.model = 'gpt-5.6-luna';
+    const result = await failing.summarize(input);
+    expect(result.meta.schemaVersion).not.toBe(2);
+    expect(result.summary).not.toContain('###');
+  });
 });
