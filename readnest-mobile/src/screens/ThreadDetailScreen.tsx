@@ -4,6 +4,7 @@ import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
 import type { SavedThread } from "../data/mockThreads";
 import { colors, radius, spacing } from "../theme/tokens";
+import { MarkdownSummary } from "../components/summary/MarkdownSummary";
 
 type Props = {
   thread: SavedThread;
@@ -44,6 +45,8 @@ export function ThreadDetailScreen({ thread, onBack, onToggleReadStatus, onMarkR
   const core = meta?.coreSummary?.trim();
   const remainingPoints = thread.keyPoints.filter((point) => point.trim()).slice(3);
   const canRetry = thread.processStatus === "SUMMARY_FAILED" || thread.processStatus === "CONTEXT_INSUFFICIENT";
+  const hasV2Markdown = meta?.schemaVersion === 2 && typeof meta.summaryMarkdown === "string" && meta.summaryMarkdown.trim().length > 0;
+  const v2Markdown = hasV2Markdown ? meta?.summaryMarkdown : null;
   const copy = async () => {
     if (copyState === "copying") return;
     setCopyState("copying");
@@ -75,7 +78,7 @@ export function ThreadDetailScreen({ thread, onBack, onToggleReadStatus, onMarkR
       <Text numberOfLines={3} style={styles.title}>{meta?.title?.trim() || thread.title || "제목 없음"}</Text>
       <View style={styles.card}>
         <View style={styles.summaryHeader}><Ionicons name="sparkles-outline" size={20} color={colors.primary} /><Text style={styles.summaryHeaderText}>AI 요약</Text><View style={styles.spacer} /><Pressable accessibilityRole="button" accessibilityLabel={copyState === "copied" ? "복사됨" : "요약 복사"} style={styles.copyButton} onPress={() => void copy()}><Text style={styles.copyText}>{copyState === "copied" ? "✓ 복사됨" : copyState === "copying" ? "복사 중" : copyState === "failed" ? "다시 복사" : "복사"}</Text></Pressable></View>
-        {thread.processStatus === "SUMMARIZING" ? <Text style={styles.loadingSummary}>요약을 생성하는 중입니다…</Text> : thread.processStatus === "SUMMARY_FAILED" ? <Text style={styles.loadingSummary}>요약을 생성하지 못했습니다. 더보기에서 다시 시도해 주세요.</Text> : <><Text style={styles.sectionTitle}>핵심 한 줄 요약</Text><Text style={styles.heroText}>{oneLine}</Text>{points.length ? <View style={styles.points}>{points.map((point, index) => <View key={`${point}-${index}`} style={styles.point}><Text style={styles.number}>{index + 1}</Text><Text style={styles.body}>{clean(point)}</Text></View>)}</View> : null}</>}
+        {thread.processStatus === "SUMMARIZING" ? <Text style={styles.loadingSummary}>요약을 생성하는 중입니다…</Text> : thread.processStatus === "SUMMARY_FAILED" ? <Text style={styles.loadingSummary}>요약을 생성하지 못했습니다. 더보기에서 다시 시도해 주세요.</Text> : v2Markdown ? <MarkdownSummary markdown={v2Markdown} /> : <><Text style={styles.sectionTitle}>핵심 한 줄 요약</Text><Text style={styles.heroText}>{oneLine}</Text>{points.length ? <View style={styles.points}>{points.map((point, index) => <View key={`${point}-${index}`} style={styles.point}><Text style={styles.number}>{index + 1}</Text><Text style={styles.body}>{clean(point)}</Text></View>)}</View> : null}</>}
         {originalUrl ? <Pressable accessibilityRole="button" accessibilityLabel="원문 보기" style={styles.primaryCta} onPress={() => void Linking.openURL(originalUrl)}><Text style={styles.primaryCtaText}>원문 보기</Text><Ionicons name="open-outline" size={18} color={colors.surface} /></Pressable> : <Text style={styles.disabledCta}>원문 링크가 없습니다.</Text>}
       </View>
       {thread.processStatus === "SUMMARIZING" ? <Text style={styles.notice}>요약을 생성하는 중입니다.</Text> : null}
