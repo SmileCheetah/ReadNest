@@ -36,6 +36,29 @@ describe('validateSummaryMarkdown', () => {
 });
 
 describe('summary compatibility normalization', () => {
+  const goldenFixtures = {
+    numbered:
+      '### 1. 문제\n\n첫째 근거다.\n\n### 2. 원인\n\n둘째 근거다.\n\n### 3. 선택\n\n셋째 근거다.\n\n### 4. 결과\n\n넷째 근거다.\n\n### 5. 결론\n\n다섯째 결론이다.',
+    short:
+      '제품은 단순해야 한다.\n\n사용자가 핵심 기능을 바로 이해해야 하기 때문이다.',
+    comparison:
+      '### A와 B의 차이\n\nA는 빠르지만 확장에 한계가 있다. B는 느릴 수 있지만 생태계 때문에 선택된다.\n\n> 성능이 아니라 생태계가 경쟁력이다.',
+  };
+
+  it('preserves the shape of adaptive golden fixtures', () => {
+    expect(validateSummaryMarkdown(goldenFixtures.numbered)).toBe(true);
+    expect(goldenFixtures.numbered.match(/### [1-5]\./g)).toEqual([
+      '### 1.',
+      '### 2.',
+      '### 3.',
+      '### 4.',
+      '### 5.',
+    ]);
+    expect(validateSummaryMarkdown(goldenFixtures.short)).toBe(true);
+    expect(goldenFixtures.short).not.toMatch(/(^|\n)\s*\d+\.\s/);
+    expect(validateSummaryMarkdown(goldenFixtures.comparison)).toBe(true);
+    expect(goldenFixtures.comparison).toContain('성능이 아니라 생태계');
+  });
   const service = Object.create(AiSummaryService.prototype);
   const input = { url: 'https://example.com/python', text: '원문'.repeat(50) };
   const structured = {
@@ -100,6 +123,41 @@ describe('summary compatibility normalization', () => {
       const result = await failing.summarize(input);
       expect(result.meta.schemaVersion).not.toBe(2);
       expect(result.summary).not.toContain('###');
+    },
+  );
+
+  it.each([
+    [
+      'numbered',
+      goldenFixtures.numbered,
+      /### 1\.[\s\S]*### 2\.[\s\S]*### 3\.[\s\S]*### 4\.[\s\S]*### 5\./,
+    ],
+    ['short', goldenFixtures.short, /^(?!.*###)(?!.*(^|\n)\s*\d+\.\s)/],
+    [
+      'comparison',
+      goldenFixtures.comparison,
+      /A는 빠르지만[\s\S]*B는 느릴 수 있지만[\s\S]*> 성능이 아니라 생태계/,
+    ],
+  ] as const)(
+    'summarize preserves the %s V2 response shape',
+    async (_name, markdown, expected) => {
+      const mocked = Object.create(AiSummaryService.prototype);
+      mocked.logger = { warn: jest.fn() };
+      mocked.model = 'gpt-5.6-luna';
+      mocked.client = {
+        responses: {
+          create: jest.fn().mockResolvedValue({
+            output_text: JSON.stringify({
+              ...structured,
+              summaryMarkdown: markdown,
+            }),
+          }),
+        },
+      };
+      const result = await mocked.summarize(input);
+      expect(result.meta.schemaVersion).toBe(2);
+      expect(result.meta.summaryMarkdown).toBe(markdown);
+      expect(result.meta.summaryMarkdown).toMatch(expected);
     },
   );
 });
