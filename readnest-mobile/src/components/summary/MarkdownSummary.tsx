@@ -12,10 +12,7 @@ export function isSupportedMarkdown(value: unknown): value is string {
   if (/<\/?[a-z][^>]*>|```|\|.*\|/i.test(markdown)) return false;
   if (/^#{1}(?:\s|$)|^#{4,}(?:\s|$)/m.test(markdown)) return false;
   if (/\[[^\]]+\]\([^)]+\)/.test(markdown)) return false;
-  const paragraphs = markdown.split(/\n\s*\n/).map((item) => item.trim()).filter(Boolean);
-  if (new Set(paragraphs).size !== paragraphs.length) return false;
-  const boldCount = (markdown.match(/\*\*[^*]+\*\*/g) ?? []).length;
-  return boldCount <= Math.max(1, paragraphs.length) * 2 && (markdown.match(/\*\*/g) ?? []).length === boldCount * 2;
+  return true;
 }
 
 function inline(text: string) {
