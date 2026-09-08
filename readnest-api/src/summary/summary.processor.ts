@@ -54,10 +54,8 @@ export class SummaryProcessor extends WorkerHost {
         text: textForSummary,
       });
 
-      const updatedArticle = await this.prisma.savedArticle.update({
-        where: {
-          id: articleId,
-        },
+      const writeResult = await this.prisma.savedArticle.updateMany({
+        where: { id: articleId, summaryGeneration: article.summaryGeneration },
         data: {
           title: summary.title,
           rawText: textForSummary || null,
@@ -73,6 +71,11 @@ export class SummaryProcessor extends WorkerHost {
             : ProcessStatus.SUMMARY_DONE,
         },
       });
+      if (writeResult.count !== 1) {
+        this.logger.warn(`Skipping concurrent summary write: ${articleId}`);
+        return;
+      }
+      const updatedArticle = await this.prisma.savedArticle.findUniqueOrThrow({ where: { id: articleId } });
 
       await this.threadDetectionService.detectAndLink({
         articleId,
