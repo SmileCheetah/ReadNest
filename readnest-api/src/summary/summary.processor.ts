@@ -3,7 +3,11 @@ import { Logger } from '@nestjs/common';
 import { ProcessStatus } from '@prisma/client';
 import { Job } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiSummaryService } from './ai-summary.service';
+import {
+  AiSummaryService,
+  SummaryGenerationError,
+  validateSummaryMarkdown,
+} from './ai-summary.service';
 import { ContentExtractorService } from './content-extractor.service';
 import { SUMMARY_QUEUE } from './summary.constants';
 import { SummaryJobData } from './summary.service';
@@ -48,6 +52,14 @@ export class SummaryProcessor extends WorkerHost {
         title: article.title ?? extractedContent.title,
         text: textForSummary,
       });
+      if (
+        summary.meta.schemaVersion !== 2 ||
+        !validateSummaryMarkdown(summary.meta.summaryMarkdown)
+      ) {
+        throw new SummaryGenerationError(
+          '새 요약 형식을 확인하지 못했습니다. 요약을 다시 생성해 주세요.',
+        );
+      }
 
       const updatedArticle = await this.prisma.savedArticle.update({
         where: {
@@ -79,14 +91,26 @@ export class SummaryProcessor extends WorkerHost {
         ),
       });
     } catch (error) {
+      const maxAttempts = Number(job.opts.attempts ?? 1);
+      const willRetry = job.attemptsMade + 1 < maxAttempts;
+      const safeMessage =
+        error instanceof SummaryGenerationError
+          ? error.message
+          : '요약 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+      this.logger.warn(
+        `Summary job failed for ${articleId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
       await this.prisma.savedArticle.update({
         where: {
           id: articleId,
         },
         data: {
-          processStatus: ProcessStatus.SUMMARY_FAILED,
-          lastSummaryError:
-            error instanceof Error ? error.message : String(error),
+          processStatus: willRetry
+            ? ProcessStatus.SUMMARIZING
+            : ProcessStatus.SUMMARY_FAILED,
+          lastSummaryError: safeMessage,
         },
       });
 

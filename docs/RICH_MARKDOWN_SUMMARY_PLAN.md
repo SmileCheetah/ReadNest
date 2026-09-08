@@ -80,7 +80,7 @@
 - 상세 화면에서 GPT 웹과 유사한 자유로운 문서 구조를 표현할 수 있다.
 - 목록 화면은 기존 구조화 필드를 활용해 빠르고 일관되게 렌더링할 수 있다.
 - 구버전 앱과 API 호환성을 유지할 수 있다.
-- Markdown 생성 실패 시 기존 구조화 요약으로 fallback할 수 있다.
+- Markdown 생성 실패를 완성된 요약으로 위장하지 않고 재시도 가능한 실패 상태로 노출한다.
 
 ### 트레이드오프
 
@@ -118,7 +118,7 @@ type ApiSummaryMetaV2 = {
 - 동일 내용을 여러 섹션에서 반복하지 않음
 - 원문에 명확한 결론이나 메시지가 있을 때만 결론 또는 한 문장 요약 섹션을 사용
 
-DB는 기존 `summaryMeta Json?`에 additive field를 추가하므로 초기 migration은 필요하지 않다. `summary` 필드는 V1 fallback을 위해 당분간 유지한다.
+DB는 기존 `summaryMeta Json?`에 additive field를 추가하므로 초기 migration은 필요하지 않다. `summary` 필드는 구버전 앱의 API 호환성을 위해 유지하지만 현재 상세 화면에서 V1을 완성된 요약으로 표시하지 않는다.
 
 ## 5. 허용 Markdown 문법
 
@@ -154,8 +154,8 @@ DB는 기존 `summaryMeta Json?`에 additive field를 추가하므로 초기 mig
 4. `summaryMarkdown`의 길이, 빈 값, 지원하지 않는 HTML을 검증
 5. Markdown과 `oneLineSummary`, `keyPoints`가 같은 AI 응답에서 생성되게 구성
 6. 결과 전체를 `summaryMeta`, `summary`, `keyPoints`, `tags`에 한 번의 DB update로 저장
-7. V2 생성 실패 시 기존 V1 구조화 요약으로 fallback
-8. schema version과 fallback 발생률을 메트릭으로 기록
+7. V2 생성·검증 실패 시 `SUMMARY_FAILED`로 저장하고 queue retry 적용
+8. schema version과 V2 검증 실패율을 메트릭으로 기록
 
 ### 요약 프롬프트 핵심 규칙
 
@@ -215,7 +215,7 @@ Python golden fixture에서는 다음 의미가 반드시 포함되어야 한다
 - `AI 요약` 헤더 아래에서 `summaryMarkdown` 전체를 문서처럼 표시한다.
 - 요약이 매우 길면 처음 몇 문단만 보이고 `전체 요약 펼치기`를 제공할 수 있지만, 번호 항목을 임의로 3개에서 자르지 않는다.
 - 목록 화면과 홈 카드에서는 기존 `oneLineSummary`만 사용한다.
-- `summaryMarkdown`이 없으면 기존 V1 화면으로 fallback한다.
+- `summaryMarkdown`이 없으면 기존 V1 본문 대신 `새 형식으로 다시 요약`을 표시한다.
 - 현재 `clean()`으로 Markdown을 제거하는 경로는 V2 renderer에서 사용하지 않는다.
 
 ## 8. 상태 변화
@@ -223,26 +223,26 @@ Python golden fixture에서는 다음 의미가 반드시 포함되어야 한다
 ```text
 SUMMARIZING
   ├─ V2 생성 성공 → SUMMARY_DONE + summaryMarkdown 저장
-  ├─ V2 검증 실패 → V1 fallback 성공 → SUMMARY_DONE
-  └─ AI/추출 실패 → SUMMARY_FAILED 또는 CONTEXT_INSUFFICIENT
+  ├─ V2 검증 실패 → SUMMARY_FAILED + 재시도
+  └─ AI/추출 실패 → SUMMARY_FAILED
 ```
 
 외부 AI 호출은 DB transaction 밖에서 수행한다. 생성 완료 후 현재 summary generation과 job generation이 일치할 때만 결과를 저장하여 오래된 worker가 최신 결과를 덮어쓰지 않게 한다.
 
 ## 9. 실패 시나리오
 
-| 상황 | 처리 |
-| --- | --- |
-| `summaryMarkdown` 누락 | V1 구조화 요약 렌더링 |
-| Markdown 문법 오류 | 가능한 노드는 렌더링하고 나머지는 일반 텍스트 처리 |
-| raw HTML 포함 | 제거 또는 escape |
-| 지나치게 긴 요약 | 서버 길이 제한과 프론트 펼치기 적용 |
-| 굵은 표시 과다 | 프롬프트 제한 및 샘플 기반 평가 |
-| 목록 번호 누락·중복 | AI 결과 검증 또는 V1 fallback |
-| Markdown renderer crash | Error boundary 또는 V1 fallback |
-| 구버전 앱 | 기존 `summary`, `oneLineSummary`, `keyPoints` 사용 |
-| 복사 실패 | 오류 안내와 재시도 제공 |
-| 외부 AI timeout·429·5xx | queue retry와 상태 표시 |
+| 상황                    | 처리                                               |
+| ----------------------- | -------------------------------------------------- |
+| `summaryMarkdown` 누락  | 이전 형식 안내와 V2 재요약 버튼                    |
+| Markdown 문법 오류      | 가능한 노드는 렌더링하고 나머지는 일반 텍스트 처리 |
+| raw HTML 포함           | 제거 또는 escape                                   |
+| 지나치게 긴 요약        | 서버 길이 제한과 프론트 펼치기 적용                |
+| 굵은 표시 과다          | 프롬프트 제한 및 샘플 기반 평가                    |
+| 목록 번호 누락·중복     | V2 검증 실패 및 재시도                             |
+| Markdown renderer crash | 오류 안내와 V2 재요약                              |
+| 구버전 앱               | 기존 `summary`, `oneLineSummary`, `keyPoints` 사용 |
+| 복사 실패               | 오류 안내와 재시도 제공                            |
+| 외부 AI timeout·429·5xx | queue retry와 상태 표시                            |
 
 ## 10. 테스트 항목
 
@@ -253,7 +253,7 @@ SUMMARIZING
 - 원문 번호와 항목 개수 보존
 - raw HTML과 지원하지 않는 링크 검증
 - 지나치게 긴 Markdown 제한
-- V2 실패 시 V1 fallback
+- V2 실패 시 `SUMMARY_FAILED` 및 V1 미노출
 - 동일 응답의 구조화 필드와 Markdown 내용 일관성
 - 기존 데이터와 구버전 API 회귀 테스트
 
@@ -265,7 +265,7 @@ SUMMARIZING
 - 320px 폭과 200% font scale
 - TalkBack/VoiceOver 읽기 순서
 - 잘못된 Markdown과 raw HTML
-- V2 없음 → V1 fallback
+- V2 없음 → 이전 형식 안내와 재요약
 - 긴 요약 펼치기와 스크롤
 - 복사 결과가 원본 Markdown과 일치하는지 확인
 
@@ -280,7 +280,7 @@ SUMMARIZING
 ### Phase 2 — Backend 생성
 
 1. schema와 prompt 수정
-2. normalize와 fallback 구현
+2. normalize와 V2 실패 처리 구현
 3. Backend 테스트
 4. 실제 AI 출력 샘플 비교
 
@@ -288,14 +288,14 @@ SUMMARIZING
 
 1. Markdown renderer 선택 및 보안 검토
 2. Unwind 타이포그래피 매핑
-3. V1/V2 fallback
+3. V2 renderer와 V1 재요약 상태
 4. 실제 Android/iOS QA
 
 ### Phase 4 — 점진 배포
 
 - 신규 저장 글과 재요약 글부터 V2 적용
 - 기존 글은 일괄 재요약하지 않음
-- V2 생성 성공률, fallback 비율, 평균 요약 길이를 확인한 뒤 확대
+- V2 생성 성공률, 검증 실패율, 평균 요약 길이를 확인한 뒤 확대
 
 ## 12. 완료 조건
 
@@ -303,7 +303,7 @@ SUMMARIZING
 - 앱에서 문법 기호가 아닌 실제 제목·강조·목록·인용문으로 보인다.
 - 목록용 짧은 요약과 상세용 긴 요약의 책임이 분리된다.
 - 원문의 항목과 논리 구조가 보존된다.
-- V1 데이터와 구버전 앱이 정상 동작한다.
+- V1 데이터는 삭제되지 않고 현재 앱에서 재요약 상태로 표시된다.
 - 지원하지 않는 HTML과 위험 링크가 실행되지 않는다.
 - Backend fixture와 Frontend fixture가 동일한 API 계약을 사용한다.
 
@@ -312,9 +312,9 @@ SUMMARIZING
 - React Native Markdown 라이브러리는 추가하지 않고, 계약에 정의된 subset을 직접 React Native 컴포넌트로 렌더링한다.
 - renderer는 `##`/`###` heading, paragraph, `**bold**`, ordered/unordered list, blockquote와 soft/hard break만 지원한다.
 - raw HTML, 이미지, iframe, 표, 코드 펜스, 자동 링크와 임의 style은 렌더링하지 않는다.
-- `schemaVersion === 2`이고 `summaryMarkdown`이 비어 있지 않은 문자열일 때만 V2 renderer를 사용한다. 그 외에는 V1 필드와 레거시 `summary`로 fallback한다.
+- `schemaVersion === 2`이고 `summaryMarkdown`이 유효할 때만 완성된 요약으로 렌더링한다. 그 외에는 V1 본문을 숨기고 재요약 상태를 표시한다.
 - 상세 화면은 `summaryMarkdown` 전체를 표시하되 긴 문서는 문단 경계에서 접는다. 목록 화면과 홈 카드는 기존 `oneLineSummary`를 유지한다.
-- 복사는 V2 Markdown 전체와 원문 URL을 포함하고, V1은 기존 일반 텍스트 형식을 유지한다.
+- 복사와 공유는 V2 Markdown이 유효할 때만 노출한다.
 
 ## 14. 구조 적응형 생성 및 번호 보존 결정사항 (2026-09-09)
 
@@ -398,3 +398,30 @@ Backend builder가 생성한다.
 
 몇 글자 초과를 형식 실패로 취급하지 않으면서 문장을 중간에서 자르지 않는다.
 다만 모델이 120자 목표를 반복해 크게 초과하는 지는 운영 지표로 관찰한다.
+
+## 17. V2-only 상세 요약 정책 (2026-09-09)
+
+### 문제
+
+V2 생성이 실패해도 V1을 `SUMMARY_DONE`으로 저장하면 사용자는 예전 화면으로
+되돌아갔다고 느낀다. 또한 형식 실패이 성공으로 기록되어 재시도와 운영 판단이
+어렵다.
+
+### 가능한 선택지
+
+1. V1 렌더러를 주석 처리하고 빈 화면을 표시한다.
+2. V2 실패 시에도 V1을 성공 요약으로 계속 표시한다.
+3. 사용자에게는 V2만 완성된 요약으로 표시하고 V1은 재요약 상태로 표시한다.
+
+### 선택한 방법
+
+3번을 선택한다. Backend는 V2 생성·검증 실패를 `SUMMARY_FAILED`로 저장하고,
+Frontend는 V1 본문·태그·분석·복사·공유를 노출하지 않는다. 대신 `새 형식으로
+다시 요약` 액션을 제공한다. 재요약 요청 중에는 버튼을 잠그고, 최대
+40초 동안 2초 간격으로 상태를 확인해 상세 화면을 자동 갱신한다.
+
+### 선택 이유와 트레이드오프
+
+요약 품질 실패를 성공으로 위장하지 않고, 사용자가 바로 복구할 수 있다. 기존
+V1 데이터는 삭제하지 않아 역호환성을 유지한다. 다만 V2 생성이 연속해 실패하면
+요약 대신 오류 상태가 보이므로 queue retry와 실패 원인 관찰이 필요하다.

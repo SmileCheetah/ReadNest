@@ -2,6 +2,7 @@
 import {
   AiSummaryService,
   MAX_SUMMARY_MARKDOWN_LENGTH,
+  SummaryGenerationError,
   validateSummaryMarkdown,
 } from './ai-summary.service';
 
@@ -90,27 +91,23 @@ describe('summary compatibility normalization', () => {
     expect(result.meta.schemaVersion).toBe(2);
   });
 
-  it('falls back to AI structured fields when only markdown is invalid', () => {
-    const result = service.normalizeLegacyStructuredSummary(
-      { ...structured, summaryMarkdown: '<script>bad</script>' },
-      input,
-    );
-    expect(result.title).toBe(structured.title);
-    expect(result.keyPoints).toEqual(structured.keyPoints);
-    expect(result.summary).toContain(structured.oneLineSummary);
-    expect(result.summary).not.toContain('<script>');
-    expect(result.meta.schemaVersion).toBe(1);
-    expect(result.meta.summaryMarkdown).toBeUndefined();
-  });
-
   it('preserves the Python golden-meaning fixture', () => {
     expect(structured.coreSummary).toContain('사람과 AI 모두 Python');
     expect(structured.keyPoints.join(' ')).toContain('C/C++·CUDA');
     expect(structured.conclusion).toContain('생태계와 네트워크 효과');
   });
 
+  it('throws instead of creating a V1 summary when the AI client is unavailable', async () => {
+    const unavailable = Object.create(AiSummaryService.prototype);
+    unavailable.client = null;
+
+    await expect(unavailable.summarize(input)).rejects.toBeInstanceOf(
+      SummaryGenerationError,
+    );
+  });
+
   it.each(['timeout', '429', '500'])(
-    'uses fallback when OpenAI returns %s',
+    'throws a retryable summary error when OpenAI returns %s',
     async (kind) => {
       const failing = Object.create(AiSummaryService.prototype);
       failing.logger = { warn: jest.fn() };
@@ -120,11 +117,41 @@ describe('summary compatibility normalization', () => {
         },
       };
       failing.model = 'gpt-5.6-luna';
-      const result = await failing.summarize(input);
-      expect(result.meta.schemaVersion).not.toBe(2);
-      expect(result.summary).not.toContain('###');
+      await expect(failing.summarize(input)).rejects.toEqual(
+        expect.objectContaining({
+          name: 'SummaryGenerationError',
+          message: expect.stringContaining('다시 시도'),
+        }),
+      );
     },
   );
+
+  it('throws instead of returning V1 when the V2 document is invalid', async () => {
+    const mocked = Object.create(AiSummaryService.prototype);
+    mocked.logger = { warn: jest.fn() };
+    mocked.model = 'gpt-5.6-luna';
+    mocked.client = {
+      responses: {
+        create: jest.fn().mockResolvedValue({
+          output_text: JSON.stringify({
+            ...structured,
+            document: {
+              style: 'numbered',
+              coreClaim: '핵심 주장',
+              sectionTitle: '다섯 가지 역량',
+              items: [],
+              conclusion: '',
+              takeaway: '',
+            },
+          }),
+        }),
+      },
+    };
+
+    await expect(mocked.summarize(input)).rejects.toBeInstanceOf(
+      SummaryGenerationError,
+    );
+  });
 
   it.each([
     [

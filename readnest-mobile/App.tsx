@@ -128,8 +128,7 @@ export default function App() {
     try {
       const articles = await readnestApi.listArticles(accessToken, {
         period: mapArchiveTabToPeriod(activeArchiveTab),
-        readStatus:
-          archiveReadFilter === "ALL" ? undefined : archiveReadFilter,
+        readStatus: archiveReadFilter === "ALL" ? undefined : archiveReadFilter,
         search: archiveSearch,
         limit: 100,
       });
@@ -316,6 +315,42 @@ export default function App() {
     await changeThreadReadStatus(thread, "READ_LATER");
   };
 
+  const pollSummaryUntilSettled = async (articleId: string) => {
+    if (!accessToken) return;
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      try {
+        const article = await readnestApi.getArticle(accessToken, articleId);
+        const nextThread = mapArticleToThread(article);
+
+        setThreads((current) =>
+          current.map((item) =>
+            item.id === nextThread.id ? nextThread : item,
+          ),
+        );
+        setArchiveThreads((current) =>
+          current.map((item) =>
+            item.id === nextThread.id ? nextThread : item,
+          ),
+        );
+        setSelectedThread((current) =>
+          current?.id === nextThread.id ? nextThread : current,
+        );
+
+        if (
+          nextThread.processStatus !== "SAVED" &&
+          nextThread.processStatus !== "SUMMARIZING"
+        ) {
+          return;
+        }
+      } catch {
+        // A temporary refresh failure should not cancel the bounded status poll.
+      }
+    }
+  };
+
   const retryThreadSummary = async (thread: SavedThread) => {
     if (!accessToken) return;
 
@@ -331,10 +366,7 @@ export default function App() {
       );
       setSelectedThread(nextThread);
       Alert.alert("재시도 시작", "요약을 다시 생성하고 있습니다.");
-      setTimeout(() => {
-        void refreshArticles();
-        void refreshArchiveArticles();
-      }, 2500);
+      void pollSummaryUntilSettled(thread.id);
     } catch (error) {
       Alert.alert(
         "재시도 실패",
@@ -546,7 +578,11 @@ function cleanSummaryText(value: string) {
     .trim();
 }
 
-function SummarySection({ title, children, emphasis = false }: {
+function SummarySection({
+  title,
+  children,
+  emphasis = false,
+}: {
   title: string;
   children: string;
   emphasis?: boolean;
@@ -558,11 +594,18 @@ function SummarySection({ title, children, emphasis = false }: {
 
   return (
     <View style={emphasis ? styles.oneLineSummary : styles.summarySection}>
-      <Text style={emphasis ? styles.oneLineSummaryTitle : styles.summarySectionTitle}>
+      <Text
+        style={
+          emphasis ? styles.oneLineSummaryTitle : styles.summarySectionTitle
+        }
+      >
         {title}
       </Text>
       {paragraphs.map((paragraph, index) => (
-        <Text key={`${title}-${index}`} style={emphasis ? styles.oneLineSummaryText : styles.summaryBodyText}>
+        <Text
+          key={`${title}-${index}`}
+          style={emphasis ? styles.oneLineSummaryText : styles.summaryBodyText}
+        >
           {paragraph}
         </Text>
       ))}
@@ -611,13 +654,14 @@ function AuthScreen({
     >
       <View style={styles.authCard}>
         <View style={styles.authBrandRow}>
-          <Image source={require("./assets/unwind-icon.png")} style={styles.authLogo} />
+          <Image
+            source={require("./assets/unwind-icon.png")}
+            style={styles.authLogo}
+          />
           <Text style={styles.authBrand}>Unwind</Text>
         </View>
         <Text style={styles.authTitle}>
-          {mode === "login"
-            ? "다시 읽을 지식을 모아두세요"
-            : "Unwind 시작하기"}
+          {mode === "login" ? "다시 읽을 지식을 모아두세요" : "Unwind 시작하기"}
         </Text>
         <Text style={styles.authSubtitle}>
           Threads 링크를 저장하고 날짜별로 정리합니다.
@@ -675,7 +719,6 @@ function AuthScreen({
               : "이미 계정이 있나요? 로그인"}
           </Text>
         </Pressable>
-
       </View>
     </KeyboardAvoidingView>
   );
@@ -1060,7 +1103,10 @@ function ThreadDetail({
               if (thread.rawText?.trim()) {
                 setShowSource((visible) => !visible);
               } else {
-                Alert.alert("원문 없음", "요약에 사용된 원문이 아직 저장되지 않았습니다.");
+                Alert.alert(
+                  "원문 없음",
+                  "요약에 사용된 원문이 아직 저장되지 않았습니다.",
+                );
               }
             }}
           >
@@ -1163,7 +1209,10 @@ function ThreadDetail({
             </View>
             {thread.summaryMeta ? (
               <>
-                <SummarySection title="핵심 내용" children={thread.summaryMeta.coreSummary} />
+                <SummarySection
+                  title="핵심 내용"
+                  children={thread.summaryMeta.coreSummary}
+                />
                 <SummarySection
                   title="핵심 한 줄 요약"
                   children={thread.summaryMeta.oneLineSummary}
@@ -1171,10 +1220,11 @@ function ThreadDetail({
                 />
               </>
             ) : (
-              <Text style={styles.summaryBodyText}>{cleanSummaryText(thread.summary)}</Text>
+              <Text style={styles.summaryBodyText}>
+                {cleanSummaryText(thread.summary)}
+              </Text>
             )}
           </View>
-
         </View>
       </ScrollView>
     </View>

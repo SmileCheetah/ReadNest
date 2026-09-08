@@ -41,6 +41,13 @@ type GeneratedSummaryPayload = Omit<
   'summaryMarkdown'
 > & { document: SummaryDocument };
 
+export class SummaryGenerationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SummaryGenerationError';
+  }
+}
+
 @Injectable()
 export class AiSummaryService {
   private readonly logger = new Logger(AiSummaryService.name);
@@ -59,7 +66,9 @@ export class AiSummaryService {
     text: string;
   }): Promise<SummaryResult> {
     if (!this.client) {
-      return this.createFallbackSummary(input);
+      throw new SummaryGenerationError(
+        'AI 요약 설정이 필요합니다. 서버 설정을 확인한 뒤 다시 시도해 주세요.',
+      );
     }
 
     try {
@@ -216,71 +225,24 @@ export class AiSummaryService {
       ) as GeneratedSummaryPayload;
       const summaryMarkdown = buildSummaryMarkdown(parsed.document);
       if (parsed.schemaVersion !== 2 || !summaryMarkdown) {
-        this.logger.warn('V2 summary validation failed, using V1 fallback');
-        return this.normalizeLegacyStructuredSummary(parsed, input);
+        this.logger.warn('V2 summary validation failed');
+        throw new SummaryGenerationError(
+          '새 요약 형식을 검증하지 못했습니다. 요약을 다시 생성해 주세요.',
+        );
       }
       return this.normalizeSummary({ ...parsed, summaryMarkdown }, input);
     } catch (error) {
+      if (error instanceof SummaryGenerationError) throw error;
       this.logger.warn(
-        `OpenAI summary failed, using fallback: ${
+        `OpenAI summary failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
 
-      return this.createFallbackSummary(input);
+      throw new SummaryGenerationError(
+        'AI 요약 생성 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.',
+      );
     }
-  }
-
-  private createFallbackSummary(input: {
-    url: string;
-    title?: string | null;
-    text: string;
-  }): SummaryResult {
-    const title = input.title || this.createTitleFromUrl(input.url);
-    const hasText = input.text.trim().length > 80;
-
-    return {
-      title,
-      summary: hasText
-        ? [
-            '요약 유형: 기타',
-            `제목: ${title}`,
-            `한 줄 요약: ${title}에 대한 저장글입니다.`,
-            '',
-            '핵심 주장: OpenAI API 키가 설정되면 원문 의미를 구조화한 요약으로 자동 생성됩니다.',
-            '주요 내용:',
-            ...this.createFallbackKeyPoints(input.text).map(
-              (point, index) => `${index + 1}. ${point}`,
-            ),
-            '',
-            '결론: 현재는 AI 요약 대신 fallback 요약이 저장되었습니다.',
-            '핵심 키워드: Threads, 요약대기',
-            '맥락 상태: 완결',
-            '연속 글 상태: unknown',
-            '요약 신뢰도: 0.4',
-          ].join('\n')
-        : [
-            '요약 유형: 기타',
-            `제목: ${title}`,
-            '한 줄 요약: 원문을 충분히 가져오지 못했습니다.',
-            '',
-            '핵심 주장: URL과 메타데이터만 확인되어 원문의 핵심 주장을 판단할 수 없습니다.',
-            '주요 내용:',
-            '1. 원문 정보 부족',
-            '',
-            '결론: 추가 원문 맥락이 필요합니다.',
-            '핵심 키워드: Threads',
-            '맥락 상태: 불명확',
-            '연속 글 상태: unknown',
-            '요약 신뢰도: 0.2',
-          ].join('\n'),
-      keyPoints: hasText
-        ? this.createFallbackKeyPoints(input.text)
-        : ['URL 저장 완료', '원문 추출 제한 감지', '추가 맥락 확인 필요'],
-      tags: ['Threads', 'ReadNest', hasText ? '요약대기' : '맥락부족'],
-      contextInsufficient: !hasText,
-      meta: this.createFallbackMeta(input, title, hasText),
-    };
   }
 
   private normalizeSummary(
@@ -299,55 +261,11 @@ export class AiSummaryService {
       ),
       meta: {
         ...result,
-        schemaVersion: result.schemaVersion ?? 1,
+        schemaVersion: 2,
         confidence,
         keyPoints: result.keyPoints.slice(0, 5),
         tags: result.tags.slice(0, 5),
       },
-    };
-  }
-
-  private normalizeLegacyStructuredSummary(
-    result: Partial<StructuredSummaryResult>,
-    input: { url: string; title?: string | null; text: string },
-  ): SummaryResult {
-    if (
-      !result.title ||
-      !result.oneLineSummary ||
-      !result.coreSummary ||
-      !Array.isArray(result.keyPoints) ||
-      !Array.isArray(result.tags)
-    )
-      return this.createFallbackSummary(input);
-    const legacyFields = { ...result };
-    delete legacyFields.summaryMarkdown;
-    delete legacyFields.schemaVersion;
-    const normalized = {
-      ...legacyFields,
-      schemaVersion: 1,
-      summaryType: result.summaryType ?? '기타',
-      conclusion: result.conclusion ?? '',
-      readingValue: result.readingValue ?? '',
-      caution: result.caution ?? '',
-      contextStatus: result.contextStatus ?? '불명확',
-      threadStatus: result.threadStatus ?? '해당 없음',
-      confidence: result.confidence ?? 0,
-      keyPoints: result.keyPoints
-        .filter((value): value is string => typeof value === 'string')
-        .slice(0, 5),
-      tags: result.tags
-        .filter((value): value is string => typeof value === 'string')
-        .slice(0, 5),
-    } as StructuredSummaryResult;
-    return {
-      title: normalized.title,
-      summary: this.createLegacySummaryText(normalized),
-      keyPoints: normalized.keyPoints,
-      tags: normalized.tags,
-      contextInsufficient: ['맥락 부족', '부분 요약', '불명확'].includes(
-        normalized.contextStatus,
-      ),
-      meta: normalized,
     };
   }
 
@@ -361,105 +279,6 @@ export class AiSummaryService {
       '',
       result.oneLineSummary,
     ].join('\n');
-  }
-
-  private createFallbackMeta(
-    input: { url: string; title?: string | null; text: string },
-    title: string,
-    hasText: boolean,
-  ): StructuredSummaryResult {
-    if (!hasText) {
-      return {
-        summaryType: '기타',
-        title,
-        oneLineSummary: '원문을 충분히 가져오지 못했습니다.',
-        coreSummary:
-          'URL과 메타데이터를 기준으로 저장되었으며 추가 맥락이 필요할 수 있습니다.',
-        conclusion: '추가 원문 맥락이 필요합니다.',
-        keyPoints: [
-          'URL 저장 완료',
-          '원문 추출 제한 감지',
-          '추가 맥락 확인 필요',
-        ],
-        tags: ['Threads', 'ReadNest', '맥락부족'],
-        readingValue: '원문 링크를 보관했다는 점에서 다시 확인할 수 있습니다.',
-        caution: '본문 정보가 부족해 요약 정확도가 낮습니다.',
-        contextStatus: '불명확',
-        threadStatus: this.detectThreadStatus(input.text),
-        confidence: 0.2,
-      };
-    }
-
-    return {
-      summaryType: '기타',
-      title,
-      oneLineSummary: `${title}에 대한 저장글입니다.`,
-      coreSummary:
-        'OpenAI API 키가 설정되면 원문 의미를 구조화한 요약으로 자동 생성됩니다.',
-      conclusion: '현재는 AI 요약 대신 fallback 요약이 저장되었습니다.',
-      keyPoints: this.createFallbackKeyPoints(input.text),
-      tags: ['Threads', 'ReadNest', '요약대기'],
-      readingValue:
-        '저장한 원문을 나중에 다시 검토할 수 있도록 보관되었습니다.',
-      caution: '현재는 AI 요약 대신 fallback 요약이 저장되었습니다.',
-      contextStatus: '완결',
-      threadStatus: this.detectThreadStatus(input.text),
-      confidence: 0.4,
-    };
-  }
-
-  private detectThreadStatus(text: string) {
-    const fractions = Array.from(
-      text.matchAll(/(?:^|\s)(\d{1,2})\s*\/\s*(\d{1,2})(?:\s|$)/g),
-    );
-    const dotted = Array.from(text.matchAll(/(?:^|\n)\s*(\d{1,2})\.\s+/g));
-    const totals = fractions
-      .map((match) => Number(match[2]))
-      .filter((total) => Number.isInteger(total) && total > 1);
-    const maxTotal = totals.length ? Math.max(...totals) : null;
-
-    if (maxTotal) {
-      const foundParts = new Set(fractions.map((match) => Number(match[1])));
-      return foundParts.size >= maxTotal
-        ? `전체 포함 ${maxTotal} of ${maxTotal}`
-        : `일부 포함 ${foundParts.size} of ${maxTotal}`;
-    }
-
-    if (dotted.length >= 3) {
-      return `전체 포함 ${dotted.length}개 번호형 글`;
-    }
-
-    return '해당 없음';
-  }
-
-  private createFallbackKeyPoints(text: string) {
-    const normalizedText = text.replace(/\r\n/g, '\n');
-    const numberedClaims = Array.from(
-      normalizedText.matchAll(
-        /(?:^|\n)\s*(\d{1,2})\.\s+([\s\S]*?)(?=\n\s*\d{1,2}\.\s+|$)/g,
-      ),
-    )
-      .map((match) => {
-        const partNumber = match[1];
-        const claim = match[2]
-          .replace(/\s+/g, ' ')
-          .replace(/\s+\d{1,2}\s*\/\s*\d{1,2}\s*$/g, '')
-          .trim();
-
-        return claim ? `${partNumber}. ${claim.slice(0, 180)}` : null;
-      })
-      .filter((claim): claim is string => Boolean(claim))
-      .slice(0, 12);
-
-    if (numberedClaims.length >= 3) {
-      return numberedClaims;
-    }
-
-    return [
-      '원문 추출 완료',
-      '요약 큐 처리 완료',
-      '번호별 주장 구조 정리 가능',
-    ];
   }
 
   private createTitleFromUrl(url: string) {
