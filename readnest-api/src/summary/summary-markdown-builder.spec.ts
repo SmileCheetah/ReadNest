@@ -98,4 +98,27 @@ describe('buildSummaryMarkdown', () => {
       }),
     ).toBeNull();
   });
+
+  it('accepts descriptions whose length follows the source complexity', () => {
+    const description = '한글 핵심 설명을 문장 단위로 보존한다. '
+      .repeat(7)
+      .trim();
+    const markdown = buildSummaryMarkdown({
+      style: 'numbered',
+      coreClaim: '주장',
+      sectionTitle: '다섯 가지 역량',
+      items: [
+        {
+          sourceOrder: 1,
+          title: '풀스택 이해',
+          description,
+        },
+      ],
+      conclusion: '',
+      takeaway: '',
+    });
+
+    expect(markdown).toContain(description);
+    expect(validateSummaryMarkdown(markdown)).toBe(true);
+  });
 });

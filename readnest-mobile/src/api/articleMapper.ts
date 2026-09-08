@@ -40,16 +40,9 @@ export function mapArticleToThread(article: ApiArticle): SavedThread {
     summary:
       article.summary ??
       "아직 요약이 생성되지 않았습니다. 요약 큐 연결 후 자동으로 채워질 예정입니다.",
-        summaryMeta: article.summaryMeta
+    summaryMeta: article.summaryMeta
       ? {
-          schemaVersion:
-            "schemaVersion" in article.summaryMeta
-              ? article.summaryMeta.schemaVersion
-              : undefined,
-          summaryMarkdown:
-            "summaryMarkdown" in article.summaryMeta
-              ? article.summaryMeta.summaryMarkdown
-              : undefined,
+          summaryMarkdown: article.summaryMeta.summaryMarkdown,
           summaryType: article.summaryMeta.summaryType,
           title: article.summaryMeta.title,
           oneLineSummary: article.summaryMeta.oneLineSummary,

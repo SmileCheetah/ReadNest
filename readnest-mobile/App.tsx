@@ -16,7 +16,6 @@ import {
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
-import * as Clipboard from "expo-clipboard";
 import * as SecureStore from "expo-secure-store";
 import * as ExpoLinking from "expo-linking";
 import { Ionicons } from "@expo/vector-icons";
@@ -128,8 +127,7 @@ export default function App() {
     try {
       const articles = await readnestApi.listArticles(accessToken, {
         period: mapArchiveTabToPeriod(activeArchiveTab),
-        readStatus:
-          archiveReadFilter === "ALL" ? undefined : archiveReadFilter,
+        readStatus: archiveReadFilter === "ALL" ? undefined : archiveReadFilter,
         search: archiveSearch,
         limit: 100,
       });
@@ -316,6 +314,42 @@ export default function App() {
     await changeThreadReadStatus(thread, "READ_LATER");
   };
 
+  const pollSummaryUntilSettled = async (articleId: string) => {
+    if (!accessToken) return;
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      try {
+        const article = await readnestApi.getArticle(accessToken, articleId);
+        const nextThread = mapArticleToThread(article);
+
+        setThreads((current) =>
+          current.map((item) =>
+            item.id === nextThread.id ? nextThread : item,
+          ),
+        );
+        setArchiveThreads((current) =>
+          current.map((item) =>
+            item.id === nextThread.id ? nextThread : item,
+          ),
+        );
+        setSelectedThread((current) =>
+          current?.id === nextThread.id ? nextThread : current,
+        );
+
+        if (
+          nextThread.processStatus !== "SAVED" &&
+          nextThread.processStatus !== "SUMMARIZING"
+        ) {
+          return;
+        }
+      } catch {
+        // A temporary refresh failure should not cancel the bounded status poll.
+      }
+    }
+  };
+
   const retryThreadSummary = async (thread: SavedThread) => {
     if (!accessToken) return;
 
@@ -331,10 +365,7 @@ export default function App() {
       );
       setSelectedThread(nextThread);
       Alert.alert("재시도 시작", "요약을 다시 생성하고 있습니다.");
-      setTimeout(() => {
-        void refreshArticles();
-        void refreshArchiveArticles();
-      }, 2500);
+      void pollSummaryUntilSettled(thread.id);
     } catch (error) {
       Alert.alert(
         "재시도 실패",
@@ -343,11 +374,6 @@ export default function App() {
           : "요약 재시도를 시작하지 못했습니다.",
       );
     }
-  };
-
-  const copyThreadSummary = async (thread: SavedThread) => {
-    await Clipboard.setStringAsync(formatThreadShareText(thread));
-    Alert.alert("복사 완료", "요약 내용이 클립보드에 복사되었습니다.");
   };
 
   const shareThreadSummary = async (thread: SavedThread) => {
@@ -519,55 +545,12 @@ export default function App() {
 }
 
 function formatThreadShareText(thread: SavedThread) {
-  const keyPoints = thread.keyPoints.map((point) => `- ${point}`).join("\n");
-  const tags = thread.tags.map((tag) => `#${tag}`).join(" ");
-
   return [
-    thread.title,
-    "",
-    thread.summary,
-    "",
-    "주요 포인트",
-    keyPoints,
-    "",
-    tags,
+    thread.summaryMeta?.summaryMarkdown?.trim() || "요약이 아직 없습니다.",
     thread.originalUrl ? `원문: ${thread.originalUrl}` : null,
   ]
     .filter(Boolean)
     .join("\n");
-}
-
-function cleanSummaryText(value: string) {
-  return value
-    .replace(/\*{1,3}/g, "")
-    .replace(/^\s*[-•]\s*/gm, "")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function SummarySection({ title, children, emphasis = false }: {
-  title: string;
-  children: string;
-  emphasis?: boolean;
-}) {
-  const paragraphs = cleanSummaryText(children)
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
-
-  return (
-    <View style={emphasis ? styles.oneLineSummary : styles.summarySection}>
-      <Text style={emphasis ? styles.oneLineSummaryTitle : styles.summarySectionTitle}>
-        {title}
-      </Text>
-      {paragraphs.map((paragraph, index) => (
-        <Text key={`${title}-${index}`} style={emphasis ? styles.oneLineSummaryText : styles.summaryBodyText}>
-          {paragraph}
-        </Text>
-      ))}
-    </View>
-  );
 }
 
 function AuthScreen({
@@ -611,13 +594,14 @@ function AuthScreen({
     >
       <View style={styles.authCard}>
         <View style={styles.authBrandRow}>
-          <Image source={require("./assets/unwind-icon.png")} style={styles.authLogo} />
+          <Image
+            source={require("./assets/unwind-icon.png")}
+            style={styles.authLogo}
+          />
           <Text style={styles.authBrand}>Unwind</Text>
         </View>
         <Text style={styles.authTitle}>
-          {mode === "login"
-            ? "다시 읽을 지식을 모아두세요"
-            : "Unwind 시작하기"}
+          {mode === "login" ? "다시 읽을 지식을 모아두세요" : "Unwind 시작하기"}
         </Text>
         <Text style={styles.authSubtitle}>
           Threads 링크를 저장하고 날짜별로 정리합니다.
@@ -675,7 +659,6 @@ function AuthScreen({
               : "이미 계정이 있나요? 로그인"}
           </Text>
         </Pressable>
-
       </View>
     </KeyboardAvoidingView>
   );
@@ -949,234 +932,6 @@ function ArchiveScreen({
       ) : (
         <EmptyText text="저장된 Thread가 없습니다." />
       )}
-    </View>
-  );
-}
-
-function ThreadDetail({
-  thread,
-  onBack,
-  onToggleReadStatus,
-  onMarkReadLater,
-  onRetrySummary,
-  onCopySummary,
-  onShareSummary,
-  onDelete,
-}: {
-  thread: SavedThread;
-  onBack: () => void;
-  onToggleReadStatus: (thread: SavedThread) => void;
-  onMarkReadLater: (thread: SavedThread) => void;
-  onRetrySummary: (thread: SavedThread) => void;
-  onCopySummary: (thread: SavedThread) => void;
-  onShareSummary: (thread: SavedThread) => void;
-  onDelete: (thread: SavedThread) => void;
-}) {
-  const [showSource, setShowSource] = useState(false);
-  const canRetry =
-    thread.processStatus === "SUMMARY_FAILED" ||
-    thread.processStatus === "CONTEXT_INSUFFICIENT";
-
-  return (
-    <View style={styles.detailRoot}>
-      <View style={styles.detailHeader}>
-        <Pressable onPress={onBack} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={22} color={colors.inkSoft} />
-        </Pressable>
-        <Text style={styles.detailBrand}>Unwind</Text>
-        <View style={styles.detailHeaderSpacer} />
-        <Pressable
-          onPress={() => onDelete(thread)}
-          style={styles.deleteIconButton}
-        >
-          <Ionicons name="trash-outline" size={20} color={colors.red} />
-        </Pressable>
-      </View>
-
-      <ScrollView
-        contentContainerStyle={styles.detailContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.metaLine}>
-          <View style={styles.sourcePillLarge}>
-            <Ionicons name="link-outline" size={14} color={colors.inkSoft} />
-            <Text style={styles.sourceLargeText}>Threads</Text>
-          </View>
-          <Text style={styles.savedDate}>{thread.savedDateLabel} 저장</Text>
-        </View>
-
-        <Text style={styles.detailTitle}>{thread.title}</Text>
-
-        {thread.summaryMeta ? (
-          <View style={styles.summaryMetaRow}>
-            <Text style={styles.summaryMetaBadge}>
-              {thread.summaryMeta.summaryType}
-            </Text>
-            <Text style={styles.summaryMetaText}>
-              맥락 {thread.summaryMeta.contextStatus}
-            </Text>
-            <Text style={styles.summaryMetaText}>
-              신뢰도 {Math.round(thread.summaryMeta.confidence * 100)}%
-            </Text>
-          </View>
-        ) : null}
-
-        <View style={styles.detailTags}>
-          {thread.tags.map((tag) => (
-            <Text key={tag} style={styles.detailTag}>
-              #{tag}
-            </Text>
-          ))}
-        </View>
-
-        <View style={styles.actionRow}>
-          <Pressable
-            style={styles.primaryPill}
-            onPress={() => onToggleReadStatus(thread)}
-          >
-            <Text style={styles.primaryPillText}>
-              {thread.readStatus === "READ" ? "안 읽음 표시" : "읽음 표시"}
-            </Text>
-          </Pressable>
-          <Pressable
-            style={styles.secondaryPill}
-            onPress={() => onMarkReadLater(thread)}
-          >
-            <Text style={styles.secondaryPillText}>나중에 보기</Text>
-          </Pressable>
-          <Pressable
-            style={styles.secondaryPill}
-            onPress={() => {
-              if (thread.originalUrl) {
-                void Linking.openURL(thread.originalUrl);
-              }
-            }}
-          >
-            <Text style={styles.secondaryPillText}>원본 링크 보기</Text>
-          </Pressable>
-          <Pressable
-            style={styles.secondaryPill}
-            onPress={() => {
-              if (thread.rawText?.trim()) {
-                setShowSource((visible) => !visible);
-              } else {
-                Alert.alert("원문 없음", "요약에 사용된 원문이 아직 저장되지 않았습니다.");
-              }
-            }}
-          >
-            <Text style={styles.secondaryPillText}>
-              {showSource ? "원문 닫기" : "원문 소스"}
-            </Text>
-          </Pressable>
-          <Pressable
-            style={styles.secondaryPill}
-            onPress={() => onCopySummary(thread)}
-          >
-            <Text style={styles.secondaryPillText}>요약 복사</Text>
-          </Pressable>
-          <Pressable
-            style={styles.secondaryPill}
-            onPress={() => onShareSummary(thread)}
-          >
-            <Text style={styles.secondaryPillText}>공유</Text>
-          </Pressable>
-          {canRetry ? (
-            <Pressable
-              style={styles.retryPill}
-              onPress={() => onRetrySummary(thread)}
-            >
-              <Ionicons
-                name="refresh-outline"
-                size={16}
-                color={colors.primary}
-              />
-              <Text style={styles.retryPillText}>요약 재시도</Text>
-            </Pressable>
-          ) : null}
-          <Pressable style={styles.dangerPill} onPress={() => onDelete(thread)}>
-            <Ionicons name="trash-outline" size={16} color={colors.red} />
-            <Text style={styles.dangerPillText}>삭제</Text>
-          </Pressable>
-        </View>
-
-        {thread.threadPart ? (
-          <View style={styles.infoNote}>
-            <Ionicons
-              name="git-network-outline"
-              size={22}
-              color={colors.primary}
-            />
-            <View style={styles.noteTextWrap}>
-              <Text style={styles.noteTitle}>
-                연결된 스레드 감지됨 Part {thread.threadPart.current} of{" "}
-                {thread.threadPart.total}
-              </Text>
-              <Text style={styles.noteBody}>
-                이 요약은 전체 시리즈의 일부를 기준으로 합니다.
-              </Text>
-            </View>
-          </View>
-        ) : null}
-
-        {thread.processStatus === "CONTEXT_INSUFFICIENT" ? (
-          <View style={styles.warningNote}>
-            <Ionicons name="warning-outline" size={21} color={colors.amber} />
-            <Text style={styles.warningText}>
-              일부 내용이 누락되었을 수 있습니다. 나머지 파트도 저장하여 전체
-              요약을 완성하세요.
-            </Text>
-          </View>
-        ) : null}
-
-        {thread.lastSummaryError ? (
-          <View style={styles.warningNote}>
-            <Ionicons
-              name="alert-circle-outline"
-              size={21}
-              color={colors.red}
-            />
-            <Text style={styles.warningText}>{thread.lastSummaryError}</Text>
-          </View>
-        ) : null}
-
-        {showSource ? (
-          <View style={styles.sourceCard}>
-            <Text style={styles.sourceTitle}>요약에 사용된 원문</Text>
-            <Text style={styles.sourceMeta}>
-              서버에서 실제로 추출·저장한 텍스트입니다.
-            </Text>
-            <Text selectable style={styles.sourceText}>
-              {thread.rawText}
-            </Text>
-          </View>
-        ) : null}
-
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryBlock}>
-            <View style={styles.summaryTitleRow}>
-              <Ionicons
-                name="sparkles-outline"
-                size={20}
-                color={colors.primary}
-              />
-              <Text style={styles.summaryTitle}>AI 요약</Text>
-            </View>
-            {thread.summaryMeta ? (
-              <>
-                <SummarySection title="핵심 내용" children={thread.summaryMeta.coreSummary} />
-                <SummarySection
-                  title="핵심 한 줄 요약"
-                  children={thread.summaryMeta.oneLineSummary}
-                  emphasis
-                />
-              </>
-            ) : (
-              <Text style={styles.summaryBodyText}>{cleanSummaryText(thread.summary)}</Text>
-            )}
-          </View>
-
-        </View>
-      </ScrollView>
     </View>
   );
 }

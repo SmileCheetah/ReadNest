@@ -56,10 +56,7 @@ export function buildSummaryMarkdown(document: unknown): string | null {
       title: clean(item.title),
       description: clean(item.description),
     }))
-    .filter(
-      (item) =>
-        item.title && item.description && item.description.length <= 120,
-    );
+    .filter((item) => item.title && item.description);
   if (items.length !== document.items.length) return null;
   if (
     document.style === 'numbered' &&

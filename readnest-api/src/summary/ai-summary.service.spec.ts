@@ -2,6 +2,7 @@
 import {
   AiSummaryService,
   MAX_SUMMARY_MARKDOWN_LENGTH,
+  SummaryGenerationError,
   validateSummaryMarkdown,
 } from './ai-summary.service';
 
@@ -26,12 +27,18 @@ describe('validateSummaryMarkdown', () => {
     expect(validateSummaryMarkdown(value)).toBe(false);
   });
 
-  it('rejects empty, oversized, and duplicated paragraphs', () => {
+  it('rejects empty and oversized Markdown', () => {
     expect(validateSummaryMarkdown('   ')).toBe(false);
     expect(
       validateSummaryMarkdown('a'.repeat(MAX_SUMMARY_MARKDOWN_LENGTH + 1)),
     ).toBe(false);
-    expect(validateSummaryMarkdown('같은 문단\n\n같은 문단')).toBe(false);
+  });
+
+  it('does not reject content based on prose repetition or emphasis count', () => {
+    expect(validateSummaryMarkdown('같은 문단\n\n같은 문단')).toBe(true);
+    expect(
+      validateSummaryMarkdown('**하나** **둘** **셋**을 함께 강조한다.'),
+    ).toBe(true);
   });
 });
 
@@ -62,7 +69,6 @@ describe('summary compatibility normalization', () => {
   const service = Object.create(AiSummaryService.prototype);
   const input = { url: 'https://example.com/python', text: '원문'.repeat(50) };
   const structured = {
-    schemaVersion: 2,
     summaryType: '학습 자료형',
     title: 'Python의 경쟁력',
     oneLineSummary: 'Python은 여러 분야를 연결한다.',
@@ -82,25 +88,11 @@ describe('summary compatibility normalization', () => {
       '### Python\n\n**연결**\n\n- AI와 데이터를 연결한다.\n\n> 생태계가 경쟁력이다.',
   };
 
-  it('keeps legacy summary plain text while storing markdown in metadata', () => {
+  it('keeps preview text while storing the canonical Markdown summary', () => {
     const result = service.normalizeSummary(structured, input);
     expect(result.summary).not.toContain('###');
     expect(result.summary).not.toContain('**');
     expect(result.meta.summaryMarkdown).toContain('### Python');
-    expect(result.meta.schemaVersion).toBe(2);
-  });
-
-  it('falls back to AI structured fields when only markdown is invalid', () => {
-    const result = service.normalizeLegacyStructuredSummary(
-      { ...structured, summaryMarkdown: '<script>bad</script>' },
-      input,
-    );
-    expect(result.title).toBe(structured.title);
-    expect(result.keyPoints).toEqual(structured.keyPoints);
-    expect(result.summary).toContain(structured.oneLineSummary);
-    expect(result.summary).not.toContain('<script>');
-    expect(result.meta.schemaVersion).toBe(1);
-    expect(result.meta.summaryMarkdown).toBeUndefined();
   });
 
   it('preserves the Python golden-meaning fixture', () => {
@@ -109,8 +101,17 @@ describe('summary compatibility normalization', () => {
     expect(structured.conclusion).toContain('생태계와 네트워크 효과');
   });
 
+  it('throws instead of creating a placeholder summary when the AI client is unavailable', async () => {
+    const unavailable = Object.create(AiSummaryService.prototype);
+    unavailable.client = null;
+
+    await expect(unavailable.summarize(input)).rejects.toBeInstanceOf(
+      SummaryGenerationError,
+    );
+  });
+
   it.each(['timeout', '429', '500'])(
-    'uses fallback when OpenAI returns %s',
+    'throws a retryable summary error when OpenAI returns %s',
     async (kind) => {
       const failing = Object.create(AiSummaryService.prototype);
       failing.logger = { warn: jest.fn() };
@@ -120,11 +121,41 @@ describe('summary compatibility normalization', () => {
         },
       };
       failing.model = 'gpt-5.6-luna';
-      const result = await failing.summarize(input);
-      expect(result.meta.schemaVersion).not.toBe(2);
-      expect(result.summary).not.toContain('###');
+      await expect(failing.summarize(input)).rejects.toEqual(
+        expect.objectContaining({
+          name: 'SummaryGenerationError',
+          message: expect.stringContaining('다시 시도'),
+        }),
+      );
     },
   );
+
+  it('throws when the structured document is invalid', async () => {
+    const mocked = Object.create(AiSummaryService.prototype);
+    mocked.logger = { warn: jest.fn() };
+    mocked.model = 'gpt-5.6-luna';
+    mocked.client = {
+      responses: {
+        create: jest.fn().mockResolvedValue({
+          output_text: JSON.stringify({
+            ...structured,
+            document: {
+              style: 'numbered',
+              coreClaim: '핵심 주장',
+              sectionTitle: '다섯 가지 역량',
+              items: [],
+              conclusion: '',
+              takeaway: '',
+            },
+          }),
+        }),
+      },
+    };
+
+    await expect(mocked.summarize(input)).rejects.toBeInstanceOf(
+      SummaryGenerationError,
+    );
+  });
 
   it.each([
     [
@@ -139,7 +170,7 @@ describe('summary compatibility normalization', () => {
       /A는 빠르지만[\s\S]*B는 생태계 때문에 선택된다[\s\S]*> 성능이 아니라 생태계/,
     ],
   ] as const)(
-    'summarize preserves the %s V2 response shape',
+    'summarize builds the %s Markdown response',
     async (_name, markdown, expected) => {
       const mocked = Object.create(AiSummaryService.prototype);
       mocked.logger = { warn: jest.fn() };
@@ -191,7 +222,6 @@ describe('summary compatibility normalization', () => {
         },
       };
       const result = await mocked.summarize(input);
-      expect(result.meta.schemaVersion).toBe(2);
       expect(result.meta.summaryMarkdown).toBeDefined();
       expect(result.meta.summaryMarkdown).toMatch(expected);
     },
