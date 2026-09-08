@@ -1,4 +1,4 @@
-import { validateSummaryMarkdown } from './ai-summary.service';
+import { validateSummaryMarkdown } from './summary-markdown-validator';
 
 export type SummaryDocument = {
   style: 'numbered' | 'thematic' | 'short';
@@ -22,7 +22,29 @@ const cleanParagraphs = (value: string) =>
     .filter(Boolean)
     .join('\n\n');
 
-export function buildSummaryMarkdown(document: SummaryDocument): string | null {
+function isSummaryDocument(value: unknown): value is SummaryDocument {
+  if (!value || typeof value !== 'object') return false;
+  const document = value as Partial<SummaryDocument>;
+  return (
+    ['numbered', 'thematic', 'short'].includes(document.style ?? '') &&
+    typeof document.coreClaim === 'string' &&
+    typeof document.sectionTitle === 'string' &&
+    Array.isArray(document.items) &&
+    typeof document.conclusion === 'string' &&
+    typeof document.takeaway === 'string' &&
+    document.items.every(
+      (item) =>
+        item !== null &&
+        typeof item === 'object' &&
+        (typeof item.sourceOrder === 'number' || item.sourceOrder === null) &&
+        typeof item.title === 'string' &&
+        typeof item.description === 'string',
+    )
+  );
+}
+
+export function buildSummaryMarkdown(document: unknown): string | null {
+  if (!isSummaryDocument(document)) return null;
   const coreClaim =
     document.style === 'short'
       ? cleanParagraphs(document.coreClaim)
@@ -41,20 +63,35 @@ export function buildSummaryMarkdown(document: SummaryDocument): string | null {
   if (items.length !== document.items.length) return null;
   if (
     document.style === 'numbered' &&
-    (items.length === 0 || items.some((item) => item.sourceOrder === null))
+    (items.length === 0 ||
+      items.some(
+        (item, index) =>
+          !Number.isInteger(item.sourceOrder) ||
+          Number(item.sourceOrder) <= 0 ||
+          (index > 0 &&
+            Number(item.sourceOrder) <= Number(items[index - 1].sourceOrder)),
+      ))
   )
     return null;
   if (document.style === 'short' && items.length > 0) return null;
 
+  const sectionTitle = clean(document.sectionTitle);
+  if (document.style !== 'short' && items.length > 0 && !sectionTitle) {
+    return null;
+  }
+
+  const conclusion = clean(document.conclusion);
+  const takeaway = clean(document.takeaway);
+
   const blocks =
     document.style === 'short'
-      ? [coreClaim]
+      ? [coreClaim, conclusion, takeaway]
       : [
           '### 핵심 주장',
           coreClaim,
           ...(items.length
             ? [
-                `### ${clean(document.sectionTitle)}`,
+                `### ${sectionTitle}`,
                 ...items.map((item) => {
                   const label =
                     document.style === 'numbered'
@@ -65,10 +102,10 @@ export function buildSummaryMarkdown(document: SummaryDocument): string | null {
               ]
             : []),
         ];
-  const conclusion = clean(document.conclusion);
-  const takeaway = clean(document.takeaway);
-  if (conclusion) blocks.push('### 결론', conclusion);
-  if (takeaway) blocks.push(`> ${takeaway}`);
+  if (document.style !== 'short' && conclusion) {
+    blocks.push('### 결론', conclusion);
+  }
+  if (document.style !== 'short' && takeaway) blocks.push(`> ${takeaway}`);
   const markdown = blocks
     .filter(Boolean)
     .join('\n\n')

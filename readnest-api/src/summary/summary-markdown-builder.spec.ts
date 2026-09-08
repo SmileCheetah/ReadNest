@@ -56,6 +56,36 @@ describe('buildSummaryMarkdown', () => {
     expect(markdown).not.toContain('>');
   });
 
+  it('renders short conclusion and takeaway as plain paragraphs', () => {
+    const markdown = buildSummaryMarkdown({
+      style: 'short',
+      coreClaim: '짧은 주장이다.',
+      sectionTitle: '',
+      items: [],
+      conclusion: '짧은 결론이다.',
+      takeaway: '핵심 메시지다.',
+    });
+    expect(markdown).toBe('짧은 주장이다.\n\n짧은 결론이다.\n\n핵심 메시지다.');
+    expect(markdown).not.toMatch(/###|>/);
+  });
+
+  it('rejects malformed documents and invalid numbered order', () => {
+    expect(buildSummaryMarkdown(undefined)).toBeNull();
+    expect(
+      buildSummaryMarkdown({
+        style: 'numbered',
+        coreClaim: '주장',
+        sectionTitle: '원칙',
+        items: [
+          { sourceOrder: 2, title: '둘째', description: '설명' },
+          { sourceOrder: 1, title: '첫째', description: '설명' },
+        ],
+        conclusion: '',
+        takeaway: '',
+      }),
+    ).toBeNull();
+  });
+
   it('rejects invalid documents', () => {
     expect(
       buildSummaryMarkdown({

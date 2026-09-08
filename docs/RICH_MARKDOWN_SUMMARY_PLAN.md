@@ -367,3 +367,10 @@ Backend builder가 생성한다.
 번호·문단·빈 섹션·허용 Markdown을 서버가 일관되게 통제할 수 있고 V1/V2 공개 계약은
 변하지 않는다. 반면 모델의 자유로운 레이아웃 표현은 줄어든다. Unwind의 핵심 압축형
 요약에는 이 제약이 적합하다.
+
+### 병합 전 리뷰 보완
+
+- Markdown validator를 독립 모듈로 분리해 service와 builder 간 순환 의존성을 제거한다.
+- `short` 스타일의 conclusion과 takeaway는 heading이나 blockquote를 추가하지 않고 일반 문단으로 연결한다.
+- 번호형의 `sourceOrder`는 양의 정수이고 엄격히 증가할 때만 V2로 생성한다.
+- 구조화 응답의 필수 필드가 누락되면 예외를 던지지 않고 builder 검증 실패로 처리한다.
