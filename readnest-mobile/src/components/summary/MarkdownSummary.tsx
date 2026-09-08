@@ -2,7 +2,8 @@ import { Fragment, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors, spacing } from "../../theme/tokens";
 
-type Block = { type: "heading" | "paragraph" | "ul" | "ol" | "quote"; level?: number; text?: string; items?: string[] };
+type ListItem = { marker?: string; text: string };
+type Block = { type: "heading" | "paragraph" | "ul" | "ol" | "quote"; level?: number; text?: string; items?: ListItem[] };
 
 export function isSupportedMarkdown(value: unknown): value is string {
   if (typeof value !== "string") return false;
@@ -24,10 +25,10 @@ function inline(text: string) {
     : <Fragment key={index}>{part.replace(/<[^>]*>/g, "")}</Fragment>);
 }
 
-function parse(markdown: string): Block[] {
+export function parseMarkdown(markdown: string): Block[] {
   const blocks: Block[] = [];
   let paragraph: string[] = [];
-  let list: { type: "ul" | "ol"; items: string[] } | null = null;
+  let list: { type: "ul" | "ol"; items: ListItem[] } | null = null;
   let quote: string[] = [];
   const flush = () => { if (paragraph.length) blocks.push({ type: "paragraph", text: paragraph.join("\n") }); paragraph = []; };
   const flushList = () => { if (list) blocks.push({ type: list.type, items: list.items }); list = null; };
@@ -37,9 +38,11 @@ function parse(markdown: string): Block[] {
     if (!line) { flush(); flushList(); flushQuote(); continue; }
     const heading = line.match(/^(#{2,3})\s+(.+)$/);
     if (heading) { flush(); flushList(); flushQuote(); blocks.push({ type: "heading", level: heading[1].length, text: heading[2] }); continue; }
-    const ordered = line.match(/^\d+[.)]\s+(.+)$/);
+    const numberedHeading = line.match(/^\d+\.\s+(\*\*[^*]+\*\*)$/);
+    if (numberedHeading) { flush(); flushList(); flushQuote(); blocks.push({ type: "heading", level: 3, text: numberedHeading[1] }); continue; }
+    const ordered = line.match(/^(\d+)[.)]\s+(.+)$/);
     const unordered = line.match(/^[-*•]\s+(.+)$/);
-    if (ordered || unordered) { flush(); flushQuote(); const type = ordered ? "ol" : "ul"; if (!list || list.type !== type) { flushList(); list = { type, items: [] }; } list.items.push((ordered || unordered)?.[1] ?? ""); continue; }
+    if (ordered || unordered) { flush(); flushQuote(); const type = ordered ? "ol" : "ul"; if (!list || list.type !== type) { flushList(); list = { type, items: [] }; } list.items.push(ordered ? { marker: ordered[1], text: ordered[2] } : { text: unordered?.[1] ?? "" }); continue; }
     if (line.startsWith(">")) { flush(); flushList(); quote.push(line.replace(/^>\s?/, "")); continue; }
     flushList(); flushQuote(); paragraph.push(line);
   }
@@ -48,18 +51,18 @@ function parse(markdown: string): Block[] {
 }
 
 export function MarkdownSummary({ markdown }: { markdown: string }) {
-  const blocks = useMemo(() => parse(markdown), [markdown]);
+  const blocks = useMemo(() => parseMarkdown(markdown), [markdown]);
   const [expanded, setExpanded] = useState(false);
   const isLong = markdown.length > 4000;
   const visibleBlocks = isLong && !expanded ? blocks.reduce<Block[]>((result, block, index) => {
-    const currentLength = result.reduce((sum, item) => sum + (item.text?.length ?? item.items?.join("").length ?? 0), 0);
-    const blockLength = block.text?.length ?? block.items?.join("").length ?? 0;
+    const currentLength = result.reduce((sum, item) => sum + (item.text?.length ?? item.items?.map((entry) => entry.text).join("").length ?? 0), 0);
+    const blockLength = block.text?.length ?? block.items?.map((entry) => entry.text).join("").length ?? 0;
     return index === 0 || currentLength + blockLength <= 4000 ? [...result, block] : result;
   }, []) : blocks;
   return <View>{visibleBlocks.map((block, index) => {
     if (block.type === "heading") return <Text key={index} accessibilityRole="header" style={block.level === 2 ? styles.h2 : styles.h3}>{inline(block.text ?? "")}</Text>;
     if (block.type === "quote") return <View key={index} style={styles.quote}><Text style={styles.quoteText}>{inline(block.text ?? "")}</Text></View>;
-    if (block.type === "ul" || block.type === "ol") return <View key={index} accessible accessibilityLabel={block.type === "ol" ? "번호 목록" : "목록"} style={styles.list}>{block.items?.map((item, itemIndex) => <View key={itemIndex} accessible style={styles.listItem}><Text style={styles.marker}>{block.type === "ol" ? `${itemIndex + 1}.` : "•"}</Text><Text style={styles.body}>{inline(item)}</Text></View>)}</View>;
+    if (block.type === "ul" || block.type === "ol") return <View key={index} accessible accessibilityLabel={block.type === "ol" ? "번호 목록" : "목록"} style={styles.list}>{block.items?.map((item, itemIndex) => <View key={itemIndex} accessible accessibilityLabel={block.type === "ol" ? `${item.marker ?? `${itemIndex + 1}`}. ${item.text}` : item.text} style={styles.listItem}><Text style={styles.marker}>{block.type === "ol" ? `${item.marker ?? `${itemIndex + 1}`}.` : "•"}</Text><Text style={styles.body}>{inline(item.text)}</Text></View>)}</View>;
     return <Text key={index} style={styles.body}>{inline(block.text ?? "")}</Text>;
   })}{isLong ? <Pressable accessibilityRole="button" accessibilityState={{ expanded }} accessibilityLabel={expanded ? "전체 요약 접기" : "전체 요약 펼치기"} style={styles.expandButton} onPress={() => setExpanded((value) => !value)}><Text style={styles.expandText}>{expanded ? "요약 접기" : "전체 요약 펼치기"}</Text></Pressable> : null}</View>;
 }

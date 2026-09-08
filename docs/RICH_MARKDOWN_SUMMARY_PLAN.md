@@ -315,3 +315,10 @@ SUMMARIZING
 - `schemaVersion === 2`이고 `summaryMarkdown`이 비어 있지 않은 문자열일 때만 V2 renderer를 사용한다. 그 외에는 V1 필드와 레거시 `summary`로 fallback한다.
 - 상세 화면은 `summaryMarkdown` 전체를 표시하되 긴 문서는 문단 경계에서 접는다. 목록 화면과 홈 카드는 기존 `oneLineSummary`를 유지한다.
 - 복사는 V2 Markdown 전체와 원문 URL을 포함하고, V1은 기존 일반 텍스트 형식을 유지한다.
+
+## Ordered list 렌더링 결정
+
+- ordered list parser는 `marker`와 항목 텍스트를 함께 보존하며 renderer가 `itemIndex + 1`로 번호를 재생성하지 않는다.
+- 빈 줄로 분리된 목록도 각 항목의 원래 번호를 유지한다. 따라서 `2.`, `3.`으로 시작하는 입력은 화면에서도 동일한 번호를 사용한다.
+- 정확히 `숫자. **짧은 제목**`만 단독으로 있는 legacy line은 목록이 아닌 h3로 표시한다. 그 외 ordered list는 일반 목록으로 보존한다.
+- V2 상세 문서는 V1 요약 카드와 분리해 카드 배경 없이 문서 흐름으로 표시한다. V1 데이터는 기존 카드와 fallback을 유지한다.
