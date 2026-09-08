@@ -15,7 +15,10 @@ export class SummaryController {
   }
 
   @Post('retry')
-  retryAlias(@CurrentUser() user: AuthUser, @Param('articleId') articleId: string) {
+  retryAlias(
+    @CurrentUser() user: AuthUser,
+    @Param('articleId') articleId: string,
+  ) {
     return this.summaryService.retryArticleSummary(user.id, articleId);
   }
 
