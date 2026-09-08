@@ -125,4 +125,39 @@ describe('summary compatibility normalization', () => {
       expect(result.summary).not.toContain('###');
     },
   );
+
+  it.each([
+    [
+      'numbered',
+      goldenFixtures.numbered,
+      /### 1\.[\s\S]*### 2\.[\s\S]*### 3\.[\s\S]*### 4\.[\s\S]*### 5\./,
+    ],
+    ['short', goldenFixtures.short, /^(?!.*###)(?!.*(^|\n)\s*\d+\.\s)/],
+    [
+      'comparison',
+      goldenFixtures.comparison,
+      /A는 빠르지만[\s\S]*B는 느릴 수 있지만[\s\S]*> 성능이 아니라 생태계/,
+    ],
+  ] as const)(
+    'summarize preserves the %s V2 response shape',
+    async (_name, markdown, expected) => {
+      const mocked = Object.create(AiSummaryService.prototype);
+      mocked.logger = { warn: jest.fn() };
+      mocked.model = 'gpt-5.6-luna';
+      mocked.client = {
+        responses: {
+          create: jest.fn().mockResolvedValue({
+            output_text: JSON.stringify({
+              ...structured,
+              summaryMarkdown: markdown,
+            }),
+          }),
+        },
+      };
+      const result = await mocked.summarize(input);
+      expect(result.meta.schemaVersion).toBe(2);
+      expect(result.meta.summaryMarkdown).toBe(markdown);
+      expect(result.meta.summaryMarkdown).toMatch(expected);
+    },
+  );
 });
