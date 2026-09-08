@@ -36,6 +36,29 @@ describe('validateSummaryMarkdown', () => {
 });
 
 describe('summary compatibility normalization', () => {
+  const goldenFixtures = {
+    numbered:
+      '### 1. 문제\n\n첫째 근거다.\n\n### 2. 원인\n\n둘째 근거다.\n\n### 3. 선택\n\n셋째 근거다.\n\n### 4. 결과\n\n넷째 근거다.\n\n### 5. 결론\n\n다섯째 결론이다.',
+    short:
+      '제품은 단순해야 한다.\n\n사용자가 핵심 기능을 바로 이해해야 하기 때문이다.',
+    comparison:
+      '### A와 B의 차이\n\nA는 빠르지만 확장에 한계가 있다. B는 느릴 수 있지만 생태계 때문에 선택된다.\n\n> 성능이 아니라 생태계가 경쟁력이다.',
+  };
+
+  it('preserves the shape of adaptive golden fixtures', () => {
+    expect(validateSummaryMarkdown(goldenFixtures.numbered)).toBe(true);
+    expect(goldenFixtures.numbered.match(/### [1-5]\./g)).toEqual([
+      '### 1.',
+      '### 2.',
+      '### 3.',
+      '### 4.',
+      '### 5.',
+    ]);
+    expect(validateSummaryMarkdown(goldenFixtures.short)).toBe(true);
+    expect(goldenFixtures.short).not.toMatch(/(^|\n)\s*\d+\.\s/);
+    expect(validateSummaryMarkdown(goldenFixtures.comparison)).toBe(true);
+    expect(goldenFixtures.comparison).toContain('성능이 아니라 생태계');
+  });
   const service = Object.create(AiSummaryService.prototype);
   const input = { url: 'https://example.com/python', text: '원문'.repeat(50) };
   const structured = {
