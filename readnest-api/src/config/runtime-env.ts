@@ -154,7 +154,7 @@ function validateDatabase(check: RuntimeEnvCheck) {
 
   if (
     isProduction() &&
-    isLocalHostname(getUrlHostname(process.env.DATABASE_URL as string))
+    isLocalHostname(getUrlHostname(process.env.DATABASE_URL))
   ) {
     check.missing.push(
       'DATABASE_URL must not point to localhost in production',

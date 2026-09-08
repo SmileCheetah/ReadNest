@@ -12,6 +12,7 @@ export type SummaryResult = {
 };
 
 export type StructuredSummaryResult = {
+  schemaVersion?: number;
   summaryType: string;
   title: string;
   oneLineSummary: string;
@@ -24,7 +25,34 @@ export type StructuredSummaryResult = {
   contextStatus: '완결' | '맥락 부족' | '부분 요약' | '불명확';
   threadStatus: string;
   confidence: number;
+  summaryMarkdown?: string;
 };
+
+export const MAX_SUMMARY_MARKDOWN_LENGTH = 16000;
+
+export function validateSummaryMarkdown(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const markdown = value.trim();
+  if (!markdown || markdown.length > MAX_SUMMARY_MARKDOWN_LENGTH) return false;
+  if (/<\/?[a-z][^>]*>|<iframe\b|<img\b/i.test(markdown)) return false;
+  if (/```|\[([^\]]+)\]\((?:javascript|data|vbscript):/i.test(markdown)) {
+    return false;
+  }
+  if (/^\s*\|.*\|\s*$/m.test(markdown) || /^\s*[-:]+\s*\|/m.test(markdown)) {
+    return false;
+  }
+  if (/\[[^\]]+\]\([^)]+\)/i.test(markdown)) return false;
+  if (/^#{1}(?:\s|$)|^#{4,}(?:\s|$)/m.test(markdown)) return false;
+  const paragraphs = markdown
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+  const uniqueParagraphs = new Set(paragraphs);
+  if (uniqueParagraphs.size !== paragraphs.length) return false;
+  const boldCount = (markdown.match(/\*\*[^*]+\*\*/g) ?? []).length;
+  const paragraphCount = Math.max(1, paragraphs.length);
+  return boldCount <= paragraphCount * 2;
+}
 
 @Injectable()
 export class AiSummaryService {
@@ -34,8 +62,7 @@ export class AiSummaryService {
 
   constructor(configService: ConfigService) {
     const apiKey = configService.get<string>('OPENAI_API_KEY');
-    this.model =
-      configService.get<string>('OPENAI_MODEL') ?? 'gpt-5.6-luna';
+    this.model = configService.get<string>('OPENAI_MODEL') ?? 'gpt-5.6-luna';
     this.client = apiKey ? new OpenAI({ apiKey }) : null;
   }
 
@@ -71,6 +98,11 @@ export class AiSummaryService {
           '사례와 반복은 줄이되 각 항목의 판단 기준과 인과관계는 남긴다.',
           '전체 출력 분량은 원문 분량의 10~20% 이내를 목표로 한다.',
           '핵심 키워드는 요약의 주요 항목 수와 같은 개수로 작성한다.',
+          '상세 요약은 summaryMarkdown 필드에 작성한다. 큰 주제는 ###, 항목 제목은 **굵게**, 세부 내용은 번호 목록 또는 bullet 목록, 중요한 흐름은 blockquote, 나머지는 2~4문장 문단으로 구성한다.',
+          'summaryMarkdown에는 ## 또는 ### heading, **굵은 강조**, 번호 목록, bullet 목록, blockquote, 문단과 줄바꿈만 사용한다. #/#### 이상 heading, raw HTML, 이미지, iframe, 표, 코드 펜스, 실행 코드, 링크는 절대 생성하지 않는다.',
+          '굵은 강조는 문단마다 핵심 표현 1~2개 이하로 제한하고, 같은 문단이나 내용을 반복하지 않는다.',
+          'A라서가 아니라 B 때문이다, A에는 한계가 있지만 B 때문에 선택된다, 성능이 아니라 생태계가 경쟁력이다 같은 대조·양보·인과 논리를 생략하지 않는다.',
+          '단순 키워드 나열이 아니라 근거 → 대조되는 사실 → 인과관계 → 결론의 흐름을 보존한다.',
           'readingValue와 caution은 원문에 명시된 내용이 없으면 빈 문자열로 둔다.',
           '연속 글 일부만 저장된 경우 전체 내용을 단정하지 않는다.',
           '',
@@ -90,6 +122,8 @@ export class AiSummaryService {
           'contextStatus: 완결, 맥락 부족, 부분 요약, 불명확 중 하나',
           'threadStatus: 전체 포함 9 of 9, 일부 포함, 해당 없음 같은 형태',
           'confidence: 0에서 1 사이 숫자',
+          'schemaVersion: 반드시 숫자 2',
+          'summaryMarkdown: 상세 화면용 완성형 Markdown 요약',
           '',
           '# 유형별 기준',
           '정보 정리형은 무슨 일이 있었는가, 왜 중요한가, 앞으로 무엇을 봐야 하는가를 담는다.',
@@ -106,49 +140,60 @@ export class AiSummaryService {
             schema: {
               type: 'object',
               properties: {
-              summaryType: { type: 'string' },
-              title: { type: 'string' },
-              oneLineSummary: { type: 'string' },
-              coreSummary: { type: 'string' },
-              keyPoints: {
-                type: 'array',
-                items: { type: 'string' },
+                schemaVersion: { type: 'number', enum: [2] },
+                summaryType: { type: 'string' },
+                title: { type: 'string' },
+                oneLineSummary: { type: 'string' },
+                coreSummary: { type: 'string' },
+                keyPoints: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+                conclusion: { type: 'string' },
+                tags: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+                readingValue: { type: 'string' },
+                caution: { type: 'string' },
+                contextStatus: { type: 'string' },
+                threadStatus: { type: 'string' },
+                confidence: { type: 'number' },
+                summaryMarkdown: { type: 'string' },
               },
-              conclusion: { type: 'string' },
-              tags: {
-                type: 'array',
-                items: { type: 'string' },
-              },
-              readingValue: { type: 'string' },
-              caution: { type: 'string' },
-              contextStatus: { type: 'string' },
-              threadStatus: { type: 'string' },
-              confidence: { type: 'number' },
-            },
-            required: [
-              'summaryType',
-              'title',
-              'oneLineSummary',
-              'coreSummary',
-              'keyPoints',
-              'conclusion',
-              'tags',
-              'readingValue',
-              'caution',
-              'contextStatus',
-              'threadStatus',
-              'confidence',
-            ],
+              required: [
+                'schemaVersion',
+                'summaryType',
+                'title',
+                'oneLineSummary',
+                'coreSummary',
+                'keyPoints',
+                'conclusion',
+                'tags',
+                'readingValue',
+                'caution',
+                'contextStatus',
+                'threadStatus',
+                'confidence',
+                'summaryMarkdown',
+              ],
               additionalProperties: false,
             },
           },
         },
       });
 
-      return this.normalizeSummary(
-        JSON.parse(response.output_text || '{}') as StructuredSummaryResult,
-        input,
-      );
+      const parsed = JSON.parse(
+        response.output_text || '{}',
+      ) as StructuredSummaryResult;
+      if (
+        parsed.schemaVersion !== 2 ||
+        !validateSummaryMarkdown(parsed.summaryMarkdown)
+      ) {
+        this.logger.warn('V2 summary validation failed, using V1 fallback');
+        return this.normalizeLegacyStructuredSummary(parsed, input);
+      }
+      return this.normalizeSummary(parsed, input);
     } catch (error) {
       this.logger.warn(
         `OpenAI summary failed, using fallback: ${
@@ -220,15 +265,7 @@ export class AiSummaryService {
 
     return {
       title: result.title || input.title || this.createTitleFromUrl(input.url),
-      summary: [
-        '핵심 내용',
-        '',
-        result.coreSummary,
-        '',
-        '핵심 한 줄 요약',
-        '',
-        result.oneLineSummary,
-      ].join('\n'),
+      summary: this.createLegacySummaryText(result),
       keyPoints: result.keyPoints.slice(0, 5),
       tags: result.tags.slice(0, 5),
       contextInsufficient: ['맥락 부족', '부분 요약', '불명확'].includes(
@@ -236,11 +273,68 @@ export class AiSummaryService {
       ),
       meta: {
         ...result,
+        schemaVersion: result.schemaVersion ?? 1,
         confidence,
         keyPoints: result.keyPoints.slice(0, 5),
         tags: result.tags.slice(0, 5),
       },
     };
+  }
+
+  private normalizeLegacyStructuredSummary(
+    result: Partial<StructuredSummaryResult>,
+    input: { url: string; title?: string | null; text: string },
+  ): SummaryResult {
+    if (
+      !result.title ||
+      !result.oneLineSummary ||
+      !result.coreSummary ||
+      !Array.isArray(result.keyPoints) ||
+      !Array.isArray(result.tags)
+    )
+      return this.createFallbackSummary(input);
+    const legacyFields = { ...result };
+    delete legacyFields.summaryMarkdown;
+    delete legacyFields.schemaVersion;
+    const normalized = {
+      ...legacyFields,
+      schemaVersion: 1,
+      summaryType: result.summaryType ?? '기타',
+      conclusion: result.conclusion ?? '',
+      readingValue: result.readingValue ?? '',
+      caution: result.caution ?? '',
+      contextStatus: result.contextStatus ?? '불명확',
+      threadStatus: result.threadStatus ?? '해당 없음',
+      confidence: result.confidence ?? 0,
+      keyPoints: result.keyPoints
+        .filter((value): value is string => typeof value === 'string')
+        .slice(0, 5),
+      tags: result.tags
+        .filter((value): value is string => typeof value === 'string')
+        .slice(0, 5),
+    } as StructuredSummaryResult;
+    return {
+      title: normalized.title,
+      summary: this.createLegacySummaryText(normalized),
+      keyPoints: normalized.keyPoints,
+      tags: normalized.tags,
+      contextInsufficient: ['맥락 부족', '부분 요약', '불명확'].includes(
+        normalized.contextStatus,
+      ),
+      meta: normalized,
+    };
+  }
+
+  private createLegacySummaryText(result: StructuredSummaryResult) {
+    return [
+      '핵심 내용',
+      '',
+      result.coreSummary,
+      '',
+      '핵심 한 줄 요약',
+      '',
+      result.oneLineSummary,
+    ].join('\n');
   }
 
   private createFallbackMeta(
