@@ -36,7 +36,10 @@ export class SummaryProcessor extends WorkerHost {
       return;
     }
 
-    if (job.data.generation !== undefined && job.data.generation !== article.summaryGeneration) {
+    if (
+      job.data.generation !== undefined &&
+      job.data.generation !== article.summaryGeneration
+    ) {
       this.logger.warn(`Skipping stale summary job: ${articleId}`);
       return;
     }
@@ -75,7 +78,9 @@ export class SummaryProcessor extends WorkerHost {
         this.logger.warn(`Skipping concurrent summary write: ${articleId}`);
         return;
       }
-      const updatedArticle = await this.prisma.savedArticle.findUniqueOrThrow({ where: { id: articleId } });
+      const updatedArticle = await this.prisma.savedArticle.findUniqueOrThrow({
+        where: { id: articleId },
+      });
 
       await this.threadDetectionService.detectAndLink({
         articleId,

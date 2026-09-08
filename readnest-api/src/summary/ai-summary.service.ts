@@ -285,17 +285,52 @@ export class AiSummaryService {
     result: Partial<StructuredSummaryResult>,
     input: { url: string; title?: string | null; text: string },
   ): SummaryResult {
-    if (!result.title || !result.oneLineSummary || !result.coreSummary || !Array.isArray(result.keyPoints) || !Array.isArray(result.tags)) return this.createFallbackSummary(input);
+    if (
+      !result.title ||
+      !result.oneLineSummary ||
+      !result.coreSummary ||
+      !Array.isArray(result.keyPoints) ||
+      !Array.isArray(result.tags)
+    )
+      return this.createFallbackSummary(input);
     const normalized = {
       ...result,
-      summaryType: result.summaryType ?? '기타', conclusion: result.conclusion ?? '', readingValue: result.readingValue ?? '', caution: result.caution ?? '', contextStatus: result.contextStatus ?? '불명확', threadStatus: result.threadStatus ?? '해당 없음', confidence: result.confidence ?? 0,
-      keyPoints: result.keyPoints.filter((value): value is string => typeof value === 'string').slice(0, 5), tags: result.tags.filter((value): value is string => typeof value === 'string').slice(0, 5),
+      summaryType: result.summaryType ?? '기타',
+      conclusion: result.conclusion ?? '',
+      readingValue: result.readingValue ?? '',
+      caution: result.caution ?? '',
+      contextStatus: result.contextStatus ?? '불명확',
+      threadStatus: result.threadStatus ?? '해당 없음',
+      confidence: result.confidence ?? 0,
+      keyPoints: result.keyPoints
+        .filter((value): value is string => typeof value === 'string')
+        .slice(0, 5),
+      tags: result.tags
+        .filter((value): value is string => typeof value === 'string')
+        .slice(0, 5),
     } as StructuredSummaryResult;
-    return { title: normalized.title, summary: this.createLegacySummaryText(normalized), keyPoints: normalized.keyPoints, tags: normalized.tags, contextInsufficient: ['맥락 부족', '부분 요약', '불명확'].includes(normalized.contextStatus), meta: normalized };
+    return {
+      title: normalized.title,
+      summary: this.createLegacySummaryText(normalized),
+      keyPoints: normalized.keyPoints,
+      tags: normalized.tags,
+      contextInsufficient: ['맥락 부족', '부분 요약', '불명확'].includes(
+        normalized.contextStatus,
+      ),
+      meta: normalized,
+    };
   }
 
   private createLegacySummaryText(result: StructuredSummaryResult) {
-    return ['핵심 내용', '', result.coreSummary, '', '핵심 한 줄 요약', '', result.oneLineSummary].join('\n');
+    return [
+      '핵심 내용',
+      '',
+      result.coreSummary,
+      '',
+      '핵심 한 줄 요약',
+      '',
+      result.oneLineSummary,
+    ].join('\n');
   }
 
   private createFallbackMeta(

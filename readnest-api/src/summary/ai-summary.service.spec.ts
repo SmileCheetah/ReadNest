@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 import {
   AiSummaryService,
   MAX_SUMMARY_MARKDOWN_LENGTH,
@@ -35,7 +36,7 @@ describe('validateSummaryMarkdown', () => {
 });
 
 describe('summary compatibility normalization', () => {
-  const service = Object.create(AiSummaryService.prototype) as any;
+  const service = Object.create(AiSummaryService.prototype);
   const input = { url: 'https://example.com/python', text: '원문'.repeat(50) };
   const structured = {
     schemaVersion: 2,
@@ -43,7 +44,10 @@ describe('summary compatibility normalization', () => {
     title: 'Python의 경쟁력',
     oneLineSummary: 'Python은 여러 분야를 연결한다.',
     coreSummary: '사람과 AI 모두 Python을 사용한다.',
-    keyPoints: ['1. AI·데이터·웹·자동화를 연결한다.', '2. C/C++·CUDA가 연산을 담당한다.'],
+    keyPoints: [
+      '1. AI·데이터·웹·자동화를 연결한다.',
+      '2. C/C++·CUDA가 연산을 담당한다.',
+    ],
     conclusion: '생태계와 네트워크 효과가 경쟁력이다.',
     tags: ['Python', '생태계'],
     readingValue: '',
@@ -51,7 +55,8 @@ describe('summary compatibility normalization', () => {
     contextStatus: '완결',
     threadStatus: '해당 없음',
     confidence: 0.9,
-    summaryMarkdown: '### Python\n\n**연결**\n\n- AI와 데이터를 연결한다.\n\n> 생태계가 경쟁력이다.',
+    summaryMarkdown:
+      '### Python\n\n**연결**\n\n- AI와 데이터를 연결한다.\n\n> 생태계가 경쟁력이다.',
   };
 
   it('keeps legacy summary plain text while storing markdown in metadata', () => {
@@ -79,13 +84,20 @@ describe('summary compatibility normalization', () => {
     expect(structured.conclusion).toContain('생태계와 네트워크 효과');
   });
 
-  it.each(['timeout', '429', '500'])('uses fallback when OpenAI returns %s', async (kind) => {
-    const failing = Object.create(AiSummaryService.prototype) as any;
-    failing.logger = { warn: jest.fn() };
-    failing.client = { responses: { create: jest.fn().mockRejectedValue(new Error(`OpenAI ${kind}`)) } };
-    failing.model = 'gpt-5.6-luna';
-    const result = await failing.summarize(input);
-    expect(result.meta.schemaVersion).not.toBe(2);
-    expect(result.summary).not.toContain('###');
-  });
+  it.each(['timeout', '429', '500'])(
+    'uses fallback when OpenAI returns %s',
+    async (kind) => {
+      const failing = Object.create(AiSummaryService.prototype);
+      failing.logger = { warn: jest.fn() };
+      failing.client = {
+        responses: {
+          create: jest.fn().mockRejectedValue(new Error(`OpenAI ${kind}`)),
+        },
+      };
+      failing.model = 'gpt-5.6-luna';
+      const result = await failing.summarize(input);
+      expect(result.meta.schemaVersion).not.toBe(2);
+      expect(result.summary).not.toContain('###');
+    },
+  );
 });
