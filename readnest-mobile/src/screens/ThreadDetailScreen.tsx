@@ -4,7 +4,7 @@ import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
 import type { SavedThread } from "../data/mockThreads";
 import { colors, radius, spacing } from "../theme/tokens";
-import { MarkdownSummary } from "../components/summary/MarkdownSummary";
+import { isSupportedMarkdown, MarkdownSummary } from "../components/summary/MarkdownSummary";
 
 type Props = {
   thread: SavedThread;
@@ -45,13 +45,16 @@ export function ThreadDetailScreen({ thread, onBack, onToggleReadStatus, onMarkR
   const core = meta?.coreSummary?.trim();
   const remainingPoints = thread.keyPoints.filter((point) => point.trim()).slice(3);
   const canRetry = thread.processStatus === "SUMMARY_FAILED" || thread.processStatus === "CONTEXT_INSUFFICIENT";
-  const hasV2Markdown = meta?.schemaVersion === 2 && typeof meta.summaryMarkdown === "string" && meta.summaryMarkdown.trim().length > 0;
+  const hasV2Markdown = meta?.schemaVersion === 2 && isSupportedMarkdown(meta.summaryMarkdown);
   const v2Markdown = hasV2Markdown ? meta?.summaryMarkdown : null;
   const copy = async () => {
     if (copyState === "copying") return;
     setCopyState("copying");
     try {
-      await Clipboard.setStringAsync([oneLine, ...thread.keyPoints.filter((point) => point.trim()), core, originalUrl ? `원문: ${originalUrl}` : null].filter(Boolean).join("\n\n"));
+      const copyText = hasV2Markdown
+        ? [meta.summaryMarkdown, originalUrl ? `원문: ${originalUrl}` : null].filter(Boolean).join("\n\n")
+        : [oneLine, ...thread.keyPoints.filter((point) => point.trim()), core, originalUrl ? `원문: ${originalUrl}` : null].filter(Boolean).join("\n\n");
+      await Clipboard.setStringAsync(copyText);
       setCopyState("copied");
       copyTimer.current = setTimeout(() => setCopyState("idle"), 2000);
     } catch {
@@ -84,7 +87,7 @@ export function ThreadDetailScreen({ thread, onBack, onToggleReadStatus, onMarkR
       {thread.processStatus === "SUMMARIZING" ? <Text style={styles.notice}>요약을 생성하는 중입니다.</Text> : null}
       {thread.processStatus === "SUMMARY_FAILED" ? <Text style={styles.notice}>요약을 생성하지 못했습니다. 더보기에서 다시 시도할 수 있습니다.</Text> : null}
       {thread.processStatus === "CONTEXT_INSUFFICIENT" ? <Text style={styles.notice}>일부 원문이 누락되었을 수 있습니다.</Text> : null}
-      {core || remainingPoints.length ? <CollapsibleSection title="자세한 요약" children={[core, ...remainingPoints].filter(Boolean).join("\n\n")} /> : null}
+      {!hasV2Markdown && (core || remainingPoints.length) ? <CollapsibleSection title="자세한 요약" children={[core, ...remainingPoints].filter(Boolean).join("\n\n")} /> : null}
       {thread.tags.length ? <View style={styles.tags}>{thread.tags.slice(0, 3).map((tag) => <Text key={tag} style={styles.tag}>#{tag}</Text>)}</View> : null}
       {meta ? <CollapsibleSection title="분석 정보" children={[`맥락 상태: ${meta.contextStatus}`, meta.caution].filter(Boolean).join("\n\n")} /> : null}
       {showSource ? <View style={styles.source}><Text style={styles.sectionTitle}>요약에 사용된 원문</Text><Text selectable style={styles.body}>{thread.rawText || "저장된 원문이 없습니다."}</Text></View> : null}

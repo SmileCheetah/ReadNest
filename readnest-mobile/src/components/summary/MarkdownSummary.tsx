@@ -4,6 +4,19 @@ import { colors, spacing } from "../../theme/tokens";
 
 type Block = { type: "heading" | "paragraph" | "ul" | "ol" | "quote"; level?: number; text?: string; items?: string[] };
 
+export function isSupportedMarkdown(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const markdown = value.trim();
+  if (!markdown || markdown.length > 16000) return false;
+  if (/<\/?[a-z][^>]*>|```|\|.*\|/i.test(markdown)) return false;
+  if (/^#{1}(?:\s|$)|^#{4,}(?:\s|$)/m.test(markdown)) return false;
+  if (/\[[^\]]+\]\([^)]+\)/.test(markdown)) return false;
+  const paragraphs = markdown.split(/\n\s*\n/).map((item) => item.trim()).filter(Boolean);
+  if (new Set(paragraphs).size !== paragraphs.length) return false;
+  const boldCount = (markdown.match(/\*\*[^*]+\*\*/g) ?? []).length;
+  return boldCount <= Math.max(1, paragraphs.length) * 2 && (markdown.match(/\*\*/g) ?? []).length === boldCount * 2;
+}
+
 function inline(text: string) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((part, index) => part.startsWith("**") && part.endsWith("**")
