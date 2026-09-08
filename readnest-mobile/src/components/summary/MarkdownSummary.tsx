@@ -1,5 +1,5 @@
-import { Fragment } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Fragment, useMemo, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors, spacing } from "../../theme/tokens";
 
 type Block = { type: "heading" | "paragraph" | "ul" | "ol" | "quote"; level?: number; text?: string; items?: string[] };
@@ -48,12 +48,19 @@ function parse(markdown: string): Block[] {
 }
 
 export function MarkdownSummary({ markdown }: { markdown: string }) {
-  return <View accessible accessibilityLabel="상세 요약">{parse(markdown).map((block, index) => {
+  const blocks = useMemo(() => parse(markdown), [markdown]);
+  const [expanded, setExpanded] = useState(false);
+  const isLong = markdown.length > 4000;
+  const visibleBlocks = isLong && !expanded ? blocks.reduce<Block[]>((result, block) => {
+    const currentLength = result.reduce((sum, item) => sum + (item.text?.length ?? item.items?.join("").length ?? 0), 0);
+    return currentLength + (block.text?.length ?? block.items?.join("").length ?? 0) <= 4000 ? [...result, block] : result;
+  }, []) : blocks;
+  return <View accessible accessibilityLabel="상세 요약">{visibleBlocks.map((block, index) => {
     if (block.type === "heading") return <Text key={index} accessibilityRole="header" style={block.level === 2 ? styles.h2 : styles.h3}>{inline(block.text ?? "")}</Text>;
     if (block.type === "quote") return <View key={index} style={styles.quote}><Text style={styles.quoteText}>{inline(block.text ?? "")}</Text></View>;
     if (block.type === "ul" || block.type === "ol") return <View key={index} accessible accessibilityLabel={block.type === "ol" ? "번호 목록" : "목록"} style={styles.list}>{block.items?.map((item, itemIndex) => <View key={itemIndex} accessible style={styles.listItem}><Text style={styles.marker}>{block.type === "ol" ? `${itemIndex + 1}.` : "•"}</Text><Text style={styles.body}>{inline(item)}</Text></View>)}</View>;
     return <Text key={index} style={styles.body}>{inline(block.text ?? "")}</Text>;
-  })}</View>;
+  })}{isLong ? <Pressable accessibilityRole="button" accessibilityState={{ expanded }} accessibilityLabel={expanded ? "전체 요약 접기" : "전체 요약 펼치기"} style={styles.expandButton} onPress={() => setExpanded((value) => !value)}><Text style={styles.expandText}>{expanded ? "요약 접기" : "전체 요약 펼치기"}</Text></Pressable> : null}</View>;
 }
 
 const styles = StyleSheet.create({
@@ -66,4 +73,6 @@ const styles = StyleSheet.create({
   marker: { color: colors.primary, width: 28, fontSize: 16, lineHeight: 27, fontWeight: "700" },
   quote: { borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: spacing.md, marginVertical: spacing.sm },
   quoteText: { color: colors.inkSoft, fontSize: 16, lineHeight: 26, fontStyle: "italic" },
+  expandButton: { minHeight: 44, justifyContent: "center", alignItems: "center", marginTop: spacing.sm },
+  expandText: { color: colors.primary, fontSize: 15, fontWeight: "700" },
 });
