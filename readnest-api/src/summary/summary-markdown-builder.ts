@@ -13,6 +13,8 @@ export type SummaryDocument = {
   takeaway: string;
 };
 
+export const MAX_ITEM_DESCRIPTION_LENGTH = 500;
+
 const clean = (value: string) => value.trim().replace(/\s+/g, ' ');
 const cleanParagraphs = (value: string) =>
   value
@@ -58,7 +60,9 @@ export function buildSummaryMarkdown(document: unknown): string | null {
     }))
     .filter(
       (item) =>
-        item.title && item.description && item.description.length <= 120,
+        item.title &&
+        item.description &&
+        item.description.length <= MAX_ITEM_DESCRIPTION_LENGTH,
     );
   if (items.length !== document.items.length) return null;
   if (

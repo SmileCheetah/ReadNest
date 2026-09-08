@@ -1,4 +1,7 @@
-import { buildSummaryMarkdown } from './summary-markdown-builder';
+import {
+  buildSummaryMarkdown,
+  MAX_ITEM_DESCRIPTION_LENGTH,
+} from './summary-markdown-builder';
 import { validateSummaryMarkdown } from './ai-summary.service';
 
 describe('buildSummaryMarkdown', () => {
@@ -93,6 +96,50 @@ describe('buildSummaryMarkdown', () => {
         coreClaim: '주장',
         sectionTitle: '',
         items: [{ sourceOrder: null, title: '항목', description: '설명' }],
+        conclusion: '',
+        takeaway: '',
+      }),
+    ).toBeNull();
+  });
+
+  it('accepts a useful description slightly over the 120-character prompt target', () => {
+    const description = '한글 핵심 설명을 문장 단위로 보존한다. '
+      .repeat(7)
+      .trim();
+    expect(description.length).toBeGreaterThan(120);
+
+    const markdown = buildSummaryMarkdown({
+      style: 'numbered',
+      coreClaim: '주장',
+      sectionTitle: '다섯 가지 역량',
+      items: [
+        {
+          sourceOrder: 1,
+          title: '풀스택 이해',
+          description,
+        },
+      ],
+      conclusion: '',
+      takeaway: '',
+    });
+
+    expect(markdown).toContain(description);
+    expect(validateSummaryMarkdown(markdown)).toBe(true);
+  });
+
+  it('still rejects abnormally long item descriptions', () => {
+    expect(
+      buildSummaryMarkdown({
+        style: 'thematic',
+        coreClaim: '주장',
+        sectionTitle: '주요 내용',
+        items: [
+          {
+            sourceOrder: null,
+            title: '항목',
+            description: '가'.repeat(MAX_ITEM_DESCRIPTION_LENGTH + 1),
+          },
+        ],
         conclusion: '',
         takeaway: '',
       }),
