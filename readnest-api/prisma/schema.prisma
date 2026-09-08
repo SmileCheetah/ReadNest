@@ -61,6 +61,7 @@ model SavedArticle {
   extractionStatus     String?
   extractionConfidence Float?
   summaryRetryCount    Int           @default(0)
+  summaryGeneration    Int           @default(0)
   lastSummaryError     String?       @db.Text
   processStatus        ProcessStatus @default(SAVED)
   readStatus           ReadStatus    @default(UNREAD)

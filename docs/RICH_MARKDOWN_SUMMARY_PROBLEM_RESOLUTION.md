@@ -12,6 +12,7 @@
 - V2 검증 실패 시 기존 fallback 경로를 사용한다.
 - 기존 구조화 필드와 `summary`/`summaryMeta` 저장은 기존처럼 한 번의 Prisma update로 수행된다.
 - Node.js 실행 기준을 `.nvmrc`의 22로 명시했다. `openai@7.10.0`의 엔진 요구사항과 일치한다.
+- `summaryGeneration`을 추가해 재시도마다 generation을 증가시키고, worker가 오래된 job 결과를 건너뛰도록 했다. BullMQ jobId에도 article과 generation을 포함한다.
 - 정상/비정상 Markdown 검증 테스트를 추가했고 build, test, lint를 통과시켰다.
 
 ## 아직 추가 작업이 필요한 항목
@@ -20,8 +21,8 @@
   정해진 뒤 추가해야 한다.
 - Python golden fixture, 번호·항목 순서 및 대조 논리 보존 검사는 모델 출력 평가 fixture가
   필요하다. 현재 validator는 형식만 검증하며 의미 보존을 자동 판정하지 않는다.
-- 중복 worker와 오래된 결과 덮어쓰기 방지는 `summaryGeneration` 컬럼과 job payload 계약을
-  추가하는 별도 DB migration이 필요하다. 현재 구현에는 아직 generation guard가 없다.
+- 중복 worker 방지는 generation guard로 보완했으며 migration 적용이 필요하다. 동일 generation의
+  동시 worker까지 완전히 직렬화하려면 추가 분산 락 검토가 필요하다.
 - DB update 호출 횟수는 코드상 단일 update이나, Prisma mock 기반 processor 통합 테스트가
   필요하다.
 - `npm audit --omit=dev` 결과 low 1, moderate 1, high 5 취약점이 확인됐다. NestJS/Prisma
