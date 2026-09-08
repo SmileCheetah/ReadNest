@@ -130,13 +130,13 @@ describe('summary compatibility normalization', () => {
     [
       'numbered',
       goldenFixtures.numbered,
-      /### 1\.[\s\S]*### 2\.[\s\S]*### 3\.[\s\S]*### 4\.[\s\S]*### 5\./,
+      /\*\*1\. 1번\*\*[\s\S]*\*\*2\. 2번\*\*[\s\S]*\*\*3\. 3번\*\*[\s\S]*\*\*4\. 4번\*\*[\s\S]*\*\*5\. 5번\*\*/,
     ],
     ['short', goldenFixtures.short, /^(?!.*###)(?!.*(^|\n)\s*\d+\.\s)/],
     [
       'comparison',
       goldenFixtures.comparison,
-      /A는 빠르지만[\s\S]*B는 느릴 수 있지만[\s\S]*> 성능이 아니라 생태계/,
+      /A는 빠르지만[\s\S]*B는 생태계 때문에 선택된다[\s\S]*> 성능이 아니라 생태계/,
     ],
   ] as const)(
     'summarize preserves the %s V2 response shape',
@@ -149,14 +149,50 @@ describe('summary compatibility normalization', () => {
           create: jest.fn().mockResolvedValue({
             output_text: JSON.stringify({
               ...structured,
-              summaryMarkdown: markdown,
+              document: {
+                style:
+                  _name === 'numbered'
+                    ? 'numbered'
+                    : _name === 'short'
+                      ? 'short'
+                      : 'thematic',
+                coreClaim: _name === 'short' ? markdown : '핵심 주장이다.',
+                sectionTitle:
+                  _name === 'numbered'
+                    ? '원문 항목'
+                    : _name === 'comparison'
+                      ? '비교'
+                      : '',
+                items:
+                  _name === 'numbered'
+                    ? [1, 2, 3, 4, 5].map((sourceOrder) => ({
+                        sourceOrder,
+                        title: `${sourceOrder}번`,
+                        description: `${sourceOrder}번 설명이다.`,
+                      }))
+                    : _name === 'comparison'
+                      ? [
+                          {
+                            sourceOrder: null,
+                            title: '비교',
+                            description:
+                              'A는 빠르지만 B는 생태계 때문에 선택된다.',
+                          },
+                        ]
+                      : [],
+                conclusion: '',
+                takeaway:
+                  _name === 'comparison'
+                    ? '성능이 아니라 생태계가 경쟁력이다.'
+                    : '',
+              },
             }),
           }),
         },
       };
       const result = await mocked.summarize(input);
       expect(result.meta.schemaVersion).toBe(2);
-      expect(result.meta.summaryMarkdown).toBe(markdown);
+      expect(result.meta.summaryMarkdown).toBeDefined();
       expect(result.meta.summaryMarkdown).toMatch(expected);
     },
   );

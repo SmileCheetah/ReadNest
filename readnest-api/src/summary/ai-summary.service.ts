@@ -1,6 +1,14 @@
 import OpenAI from 'openai';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  buildSummaryMarkdown,
+  SummaryDocument,
+} from './summary-markdown-builder';
+export {
+  MAX_SUMMARY_MARKDOWN_LENGTH,
+  validateSummaryMarkdown,
+} from './summary-markdown-validator';
 
 export type SummaryResult = {
   title: string;
@@ -28,31 +36,10 @@ export type StructuredSummaryResult = {
   summaryMarkdown?: string;
 };
 
-export const MAX_SUMMARY_MARKDOWN_LENGTH = 16000;
-
-export function validateSummaryMarkdown(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  const markdown = value.trim();
-  if (!markdown || markdown.length > MAX_SUMMARY_MARKDOWN_LENGTH) return false;
-  if (/<\/?[a-z][^>]*>|<iframe\b|<img\b/i.test(markdown)) return false;
-  if (/```|\[([^\]]+)\]\((?:javascript|data|vbscript):/i.test(markdown)) {
-    return false;
-  }
-  if (/^\s*\|.*\|\s*$/m.test(markdown) || /^\s*[-:]+\s*\|/m.test(markdown)) {
-    return false;
-  }
-  if (/\[[^\]]+\]\([^)]+\)/i.test(markdown)) return false;
-  if (/^#{1}(?:\s|$)|^#{4,}(?:\s|$)/m.test(markdown)) return false;
-  const paragraphs = markdown
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
-  const uniqueParagraphs = new Set(paragraphs);
-  if (uniqueParagraphs.size !== paragraphs.length) return false;
-  const boldCount = (markdown.match(/\*\*[^*]+\*\*/g) ?? []).length;
-  const paragraphCount = Math.max(1, paragraphs.length);
-  return boldCount <= paragraphCount * 2;
-}
+type GeneratedSummaryPayload = Omit<
+  StructuredSummaryResult,
+  'summaryMarkdown'
+> & { document: SummaryDocument };
 
 @Injectable()
 export class AiSummaryService {
@@ -98,8 +85,8 @@ export class AiSummaryService {
           '사례와 반복은 줄이되 각 항목의 판단 기준과 인과관계는 남긴다.',
           '짧고 밀도 있게 작성한다. 일반적으로 원문 분량의 10~20% 이내를 상한으로 삼되, 원문의 번호형 논리와 핵심 대조·인과관계는 보존한다. 짧은 원문은 2~4개 자연스러운 문단으로 끝낸다.',
           '핵심 키워드와 keyPoints는 원문에 실제로 있는 내용만 담고, 원문에 없는 개수나 항목을 맞추기 위해 늘리지 않는다.',
-          'summaryMarkdown의 구조는 원문 형식에 적응한다. 주장형은 주장→근거→의미, 번호형은 원문 번호·개수·순서, 비교형은 A/B 차이와 의미, 정보형은 사실→맥락으로 구성한다.',
-          '가능한 경우 summaryMarkdown은 다음 읽기 순서를 따른다: ### 핵심 주장 아래 1~2문장 핵심 주장, ### 주요 내용 아래 원문에 실제로 있는 항목만 **굵게** 표시한 뒤 항목마다 1~2개의 짧은 문장, 마지막에 원문에 명확한 결론이 있을 때만 ### 결론과 짧은 정리.',
+          'Markdown은 작성하지 않는다. document에 구조화된 요약 내용만 반환한다. Backend가 최종 Markdown을 조립한다.',
+          'document.style은 numbered, thematic, short 중 하나다. numbered는 명확한 번호형 원문에서만 사용하고 sourceOrder에 원래 번호를 넣는다. short는 items를 비운다.',
           '첫 문단에서 핵심 주장을 먼저 제시한다. 기술 키워드를 한 문장에 과도하게 나열하지 말고 핵심 문장만 **굵게** 표시한다.',
           '원문의 중요한 메시지나 대조 논리는 짧은 > 인용문으로 표시할 수 있지만, 원문에 없는 문장을 인용문으로 만들지 않는다.',
           '원문이 단일 주장이나 짧은 글이면 heading·목록·결론 섹션을 억지로 만들지 말고 2~4개 문단으로 마친다.',
@@ -130,7 +117,7 @@ export class AiSummaryService {
           'threadStatus: 전체 포함 9 of 9, 일부 포함, 해당 없음 같은 형태',
           'confidence: 0에서 1 사이 숫자',
           'schemaVersion: 반드시 숫자 2',
-          'summaryMarkdown: 상세 화면용 완성형 Markdown 요약',
+          'document: style, coreClaim, sectionTitle, items(sourceOrder/title/description), conclusion, takeaway를 가진 구조화 요약',
           '',
           '# 유형별 기준',
           '정보 정리형은 무슨 일이 있었는가, 왜 중요한가, 앞으로 무엇을 봐야 하는가를 담는다.',
@@ -166,7 +153,41 @@ export class AiSummaryService {
                 contextStatus: { type: 'string' },
                 threadStatus: { type: 'string' },
                 confidence: { type: 'number' },
-                summaryMarkdown: { type: 'string' },
+                document: {
+                  type: 'object',
+                  properties: {
+                    style: {
+                      type: 'string',
+                      enum: ['numbered', 'thematic', 'short'],
+                    },
+                    coreClaim: { type: 'string' },
+                    sectionTitle: { type: 'string' },
+                    items: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          sourceOrder: { type: ['number', 'null'] },
+                          title: { type: 'string' },
+                          description: { type: 'string' },
+                        },
+                        required: ['sourceOrder', 'title', 'description'],
+                        additionalProperties: false,
+                      },
+                    },
+                    conclusion: { type: 'string' },
+                    takeaway: { type: 'string' },
+                  },
+                  required: [
+                    'style',
+                    'coreClaim',
+                    'sectionTitle',
+                    'items',
+                    'conclusion',
+                    'takeaway',
+                  ],
+                  additionalProperties: false,
+                },
               },
               required: [
                 'schemaVersion',
@@ -182,7 +203,7 @@ export class AiSummaryService {
                 'contextStatus',
                 'threadStatus',
                 'confidence',
-                'summaryMarkdown',
+                'document',
               ],
               additionalProperties: false,
             },
@@ -192,15 +213,13 @@ export class AiSummaryService {
 
       const parsed = JSON.parse(
         response.output_text || '{}',
-      ) as StructuredSummaryResult;
-      if (
-        parsed.schemaVersion !== 2 ||
-        !validateSummaryMarkdown(parsed.summaryMarkdown)
-      ) {
+      ) as GeneratedSummaryPayload;
+      const summaryMarkdown = buildSummaryMarkdown(parsed.document);
+      if (parsed.schemaVersion !== 2 || !summaryMarkdown) {
         this.logger.warn('V2 summary validation failed, using V1 fallback');
         return this.normalizeLegacyStructuredSummary(parsed, input);
       }
-      return this.normalizeSummary(parsed, input);
+      return this.normalizeSummary({ ...parsed, summaryMarkdown }, input);
     } catch (error) {
       this.logger.warn(
         `OpenAI summary failed, using fallback: ${
