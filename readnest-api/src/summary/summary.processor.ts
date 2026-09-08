@@ -36,11 +36,6 @@ export class SummaryProcessor extends WorkerHost {
       return;
     }
 
-    if (job.data.generation !== undefined && job.data.generation !== article.summaryGeneration) {
-      this.logger.warn(`Skipping stale summary job: ${articleId}`);
-      return;
-    }
-
     try {
       const extractedContent = await this.contentExtractor.extract(article.url);
       const existingRawText = article.rawText?.trim();

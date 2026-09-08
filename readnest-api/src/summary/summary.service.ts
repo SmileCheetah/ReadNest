@@ -12,7 +12,6 @@ import { SUMMARY_ARTICLE_JOB, SUMMARY_QUEUE } from './summary.constants';
 
 export type SummaryJobData = {
   articleId: string;
-  generation?: number;
 };
 
 @Injectable()
@@ -24,12 +23,11 @@ export class SummaryService {
     private readonly summaryQueue: Queue<SummaryJobData>,
   ) {}
 
-  async enqueueArticleSummary(articleId: string, generation = 0) {
+  async enqueueArticleSummary(articleId: string) {
     await this.summaryQueue.add(
       SUMMARY_ARTICLE_JOB,
-      { articleId, generation },
+      { articleId },
       {
-        jobId: `summary:${articleId}:${generation}`,
         attempts: 2,
         backoff: {
           type: 'exponential',
@@ -50,7 +48,6 @@ export class SummaryService {
       select: {
         id: true,
         summaryRetryCount: true,
-        summaryGeneration: true,
       },
     });
 
@@ -77,12 +74,11 @@ export class SummaryService {
         summaryRetryCount: {
           increment: 1,
         },
-        summaryGeneration: { increment: 1 },
         lastSummaryError: null,
       },
     });
 
-    await this.enqueueArticleSummary(articleId, updated.summaryGeneration);
+    await this.enqueueArticleSummary(articleId);
 
     return updated;
   }
