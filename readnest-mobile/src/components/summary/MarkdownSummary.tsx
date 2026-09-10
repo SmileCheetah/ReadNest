@@ -10,7 +10,7 @@ export function isSupportedMarkdown(value: unknown): value is string {
   const markdown = value.trim();
   if (!markdown || markdown.length > 16000) return false;
   if (/<\/?[a-z][^>]*>|```|\|.*\|/i.test(markdown)) return false;
-  if (/^#{1}(?:\s|$)|^#{4,}(?:\s|$)/m.test(markdown)) return false;
+  if (/^#{4,}(?:\s|$)/m.test(markdown)) return false;
   if (/\[[^\]]+\]\([^)]+\)/.test(markdown)) return false;
   return true;
 }
@@ -33,7 +33,7 @@ export function parseMarkdown(markdown: string): Block[] {
   for (const raw of markdown.replace(/\r\n?/g, "\n").split("\n")) {
     const line = raw.trim();
     if (!line) { flush(); flushList(); flushQuote(); continue; }
-    const heading = line.match(/^(#{2,3})\s+(.+)$/);
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
     if (heading) { flush(); flushList(); flushQuote(); blocks.push({ type: "heading", level: heading[1].length, text: heading[2] }); continue; }
     const numberedHeading = line.match(/^(\d+)\.\s+(\*\*[^*]+\*\*)$/);
     if (numberedHeading) { flush(); flushList(); flushQuote(); blocks.push({ type: "heading", level: 3, text: `${numberedHeading[1]}. ${numberedHeading[2]}` }); continue; }
@@ -57,7 +57,7 @@ export function MarkdownSummary({ markdown }: { markdown: string }) {
     return index === 0 || currentLength + blockLength <= 4000 ? [...result, block] : result;
   }, []) : blocks;
   return <View>{visibleBlocks.map((block, index) => {
-    if (block.type === "heading") return <Text key={index} accessibilityRole="header" style={block.level === 2 ? styles.h2 : styles.h3}>{inline(block.text ?? "")}</Text>;
+    if (block.type === "heading") return <Text key={index} accessibilityRole="header" style={block.level === 1 ? styles.h1 : block.level === 2 ? styles.h2 : styles.h3}>{inline(block.text ?? "")}</Text>;
     if (block.type === "quote") return <View key={index} style={styles.quote}><Text style={styles.quoteText}>{inline(block.text ?? "")}</Text></View>;
     if (block.type === "ul" || block.type === "ol") return <View key={index} accessible accessibilityLabel={block.type === "ol" ? "번호 목록" : "목록"} style={styles.list}>{block.items?.map((item, itemIndex) => <View key={itemIndex} accessible accessibilityLabel={block.type === "ol" ? `${item.marker ?? `${itemIndex + 1}`}. ${item.text}` : item.text} style={styles.listItem}><Text style={styles.marker}>{block.type === "ol" ? `${item.marker ?? `${itemIndex + 1}`}.` : "•"}</Text><Text style={styles.body}>{inline(item.text)}</Text></View>)}</View>;
     return <Text key={index} style={styles.body}>{inline(block.text ?? "")}</Text>;
@@ -65,6 +65,7 @@ export function MarkdownSummary({ markdown }: { markdown: string }) {
 }
 
 const styles = StyleSheet.create({
+  h1: { color: colors.ink, fontSize: 28, lineHeight: 37, fontWeight: "800", letterSpacing: -0.7, marginBottom: spacing.lg },
   h2: { color: colors.ink, fontSize: 22, lineHeight: 31, fontWeight: "700", marginTop: spacing.lg, marginBottom: spacing.sm },
   h3: { color: colors.ink, fontSize: 20, lineHeight: 29, fontWeight: "700", marginTop: spacing.md, marginBottom: spacing.sm },
   body: { color: colors.ink, fontSize: 16, lineHeight: 27, marginBottom: spacing.md, flexShrink: 1 },

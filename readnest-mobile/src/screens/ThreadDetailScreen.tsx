@@ -207,9 +207,11 @@ export function ThreadDetailScreen({
         <Text style={styles.metaLine}>
           Threads · {thread.savedDateLabel} 저장
         </Text>
-        <Text numberOfLines={3} style={styles.title}>
-          {meta?.title?.trim() || thread.title || "제목 없음"}
-        </Text>
+        {presentation !== "ready" ? (
+          <Text numberOfLines={3} style={styles.title}>
+            {meta?.title?.trim() || thread.title || "제목 없음"}
+          </Text>
+        ) : null}
         <View
           style={
             presentation === "ready" ? styles.summaryDocument : styles.card

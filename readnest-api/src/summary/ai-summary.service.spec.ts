@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return */
 import {
   AiSummaryService,
+  buildSummaryPrompt,
   MAX_SUMMARY_MARKDOWN_LENGTH,
   SummaryGenerationError,
   validateSummaryMarkdown,
@@ -41,19 +42,30 @@ describe('AiSummaryService', () => {
     return service;
   }
 
-  it('sends only the requested plain prompt and stores Luna output as Markdown', async () => {
-    const service = createService('### 핵심 주장\n\n원문에 충실한 요약이다.');
+  it('sends the summary-editor prompt and stores Luna output as Markdown', async () => {
+    const service = createService('# 제목\n\n원문에 충실한 요약이다.');
     const result = await service.summarize(input);
     const create = service.client.responses.create;
 
     expect(create).toHaveBeenCalledWith({
       model: 'gpt-5.6-luna',
-      input: '다음 글을 요약해줘.\n\n원문 내용이다.',
+      input: buildSummaryPrompt('원문 내용이다.'),
     });
-    expect(result.summary).toBe('### 핵심 주장\n\n원문에 충실한 요약이다.');
+    expect(result.summary).toBe('# 제목\n\n원문에 충실한 요약이다.');
     expect(result.meta.summaryMarkdown).toBe(result.summary);
     expect(result.keyPoints).toEqual([]);
     expect(result.tags).toEqual([]);
+  });
+
+  it('includes the requested principles, format, and source in the prompt', () => {
+    const prompt = buildSummaryPrompt('테스트 원문');
+
+    expect(prompt).toContain(
+      '원문에 없는 정보, 추측, 평가, 사실을 추가하지 않는다.',
+    );
+    expect(prompt).toContain('### 핵심 내용');
+    expect(prompt).toContain('### 한 줄 요약');
+    expect(prompt).toMatch(/다음 글을 요약해줘\.\n\n테스트 원문$/);
   });
 
   it('rejects an empty or unsafe model response', async () => {

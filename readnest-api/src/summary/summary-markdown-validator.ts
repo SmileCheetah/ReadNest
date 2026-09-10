@@ -12,6 +12,6 @@ export function validateSummaryMarkdown(value: unknown): value is string {
     return false;
   }
   if (/\[[^\]]+\]\([^)]+\)/i.test(markdown)) return false;
-  if (/^#{1}(?:\s|$)|^#{4,}(?:\s|$)/m.test(markdown)) return false;
+  if (/^#{4,}(?:\s|$)/m.test(markdown)) return false;
   return true;
 }

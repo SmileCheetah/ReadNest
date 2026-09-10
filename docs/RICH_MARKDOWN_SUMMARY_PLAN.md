@@ -2,20 +2,12 @@
 
 ## 현재 결정
 
-원문 추출과 저장 흐름은 유지하고, AI 호출 프롬프트는 아래 한 가지로 고정한다.
-
-```text
-다음 글을 요약해줘.
-
-{원문}
-```
-
-제목, URL, 요약 유형, 출력 형식, 항목 개수, 글자 수를 프롬프트에 추가하지 않는다. 모델의 자연스러운 요약 결과를 그대로 `summaryMeta.summaryMarkdown`에 저장한다.
+원문 추출과 저장 흐름은 유지한다. AI 호출에는 요약 편집 원칙, Markdown 출력 형식, 길이 기준을 제공한 뒤 마지막에 `다음 글을 요약해줘.`와 원문을 넣는다. 모델의 응답은 그대로 `summaryMeta.summaryMarkdown`에 저장한다.
 
 ## 처리 흐름
 
 1. 저장된 원문을 기존 extractor로 가져온다.
-2. `다음 글을 요약해줘.\n\n{원문}`으로 Luna를 호출한다.
+2. 요약 편집 프롬프트와 `다음 글을 요약해줘.\n\n{원문}`으로 Luna를 호출한다.
 3. 응답 텍스트를 trim한 뒤 안전한 Markdown인지 검증한다.
 4. 검증된 응답을 상세 화면의 단일 요약 본문으로 저장한다.
 5. 빈 응답, 위험한 HTML·링크·코드·표 또는 길이 초과 응답은 실패 처리하고 재시도한다.
@@ -43,7 +35,7 @@ AI 응답에서 별도 구조화 JSON이나 내부 요약 문서를 요구하지
 - `SUMMARIZING`에서는 완성된 본문을 표시하지 않는다.
 - `SUMMARY_FAILED`에서는 오류와 재시도 버튼을 표시한다.
 - 복사·공유는 저장된 Markdown 전체를 사용한다.
-- heading, paragraph, bold, ordered list, unordered list, blockquote, 줄바꿈을 지원한다.
+- h1, h2, h3, paragraph, bold, ordered list, unordered list, blockquote, 줄바꿈을 지원한다.
 
 ## 테스트
 

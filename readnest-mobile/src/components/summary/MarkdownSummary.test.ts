@@ -22,4 +22,12 @@ describe("parseMarkdown ordered list compatibility", () => {
     ]);
     expect(isSupportedMarkdown("### 제목\n\n**강조**\n\n- 항목\n\n> 인용")).toBe(true);
   });
+
+  it("supports the document title used by the summary prompt", () => {
+    expect(parseMarkdown("# 글의 제목\n\n본문")).toMatchObject([
+      { type: "heading", level: 1, text: "글의 제목" },
+      { type: "paragraph", text: "본문" },
+    ]);
+    expect(isSupportedMarkdown("# 글의 제목\n\n### 한 줄 요약\n\n**핵심**")).toBe(true);
+  });
 });
