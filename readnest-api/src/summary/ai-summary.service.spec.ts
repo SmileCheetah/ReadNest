@@ -81,6 +81,15 @@ describe('AiSummaryService', () => {
     expect(prompt).toContain('기본 1~2문장');
     expect(prompt).toContain('3문장을 허용');
     expect(prompt).toContain(
+      '원문의 항목 수를 기계적으로 유지하거나 줄이지 않는다.',
+    );
+    expect(prompt).toContain(
+      '독립적인 주장·조건·비교·수치·주의사항은 반드시 보존한다.',
+    );
+    expect(prompt).toContain(
+      '원문에 없는 사용자의 의도, 평가, 조언은 추가하지 않는다.',
+    );
+    expect(prompt).toContain(
       '한 줄 요약 뒤에는 결론을 반복하는 문장을 추가하지 않는다.',
     );
     expect(prompt).toContain('### 핵심 내용');
