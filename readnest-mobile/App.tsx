@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Alert,
@@ -67,6 +67,8 @@ export default function App() {
   const [isRestoringSession, setIsRestoringSession] = useState(true);
   const [isSavingArticle, setIsSavingArticle] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const readStatusVersions = useRef(new Map<string, number>());
+  const autoReadInFlight = useRef(new Set<string>());
 
   const todayThreads = useMemo(
     () => threads.filter((thread) => thread.savedDateLabel === "오늘"),
@@ -274,8 +276,12 @@ export default function App() {
   const changeThreadReadStatus = async (
     thread: SavedThread,
     nextStatus: SavedThread["readStatus"],
+    options: { silent?: boolean } = {},
   ) => {
     if (!accessToken) return;
+
+    const version = (readStatusVersions.current.get(thread.id) ?? 0) + 1;
+    readStatusVersions.current.set(thread.id, version);
 
     try {
       const article = await readnestApi.updateReadStatus(
@@ -284,6 +290,7 @@ export default function App() {
         nextStatus,
       );
       const nextThread = mapArticleToThread(article);
+      if (readStatusVersions.current.get(thread.id) !== version) return;
 
       setThreads((current) =>
         current.map((item) => (item.id === nextThread.id ? nextThread : item)),
@@ -291,15 +298,43 @@ export default function App() {
       setArchiveThreads((current) =>
         current.map((item) => (item.id === nextThread.id ? nextThread : item)),
       );
-      setSelectedThread(nextThread);
+      setSelectedThread((current) =>
+        current?.id === nextThread.id ? nextThread : current,
+      );
       void refreshArchiveArticles();
     } catch (error) {
-      Alert.alert(
-        "상태 변경 실패",
-        error instanceof Error
-          ? error.message
-          : "읽음 상태를 변경하지 못했습니다.",
-      );
+      if (!options.silent) {
+        Alert.alert(
+          "상태 변경 실패",
+          error instanceof Error
+            ? error.message
+            : "읽음 상태를 변경하지 못했습니다.",
+        );
+        return;
+      }
+      throw error;
+    }
+  };
+
+  const markThreadReadOnOpen = async (thread: SavedThread) => {
+    if (
+      !accessToken ||
+      thread.readStatus !== "UNREAD" ||
+      autoReadInFlight.current.has(thread.id)
+    ) {
+      return;
+    }
+
+    autoReadInFlight.current.add(thread.id);
+    try {
+      await changeThreadReadStatus(thread, "READ", { silent: true });
+    } catch (error) {
+      console.warn("[read-status] automatic read failed", {
+        articleId: thread.id,
+        error,
+      });
+    } finally {
+      autoReadInFlight.current.delete(thread.id);
     }
   };
 
@@ -476,6 +511,7 @@ export default function App() {
           <ThreadDetailScreen
             thread={selectedThread}
             onBack={() => setSelectedThread(null)}
+            onMarkReadOnOpen={markThreadReadOnOpen}
             onToggleReadStatus={updateThreadReadStatus}
             onMarkReadLater={markThreadReadLater}
             onRetrySummary={retryThreadSummary}
