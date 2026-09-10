@@ -78,7 +78,8 @@ describe('AiSummaryService', () => {
       '원문에 없는 정보, 추측, 평가, 사실을 추가하지 않는다.',
     );
     expect(prompt).toContain('최대 두 문장의 한 문단');
-    expect(prompt).toContain('자연스러운 1~2문장');
+    expect(prompt).toContain('기본 1~2문장');
+    expect(prompt).toContain('3문장을 허용');
     expect(prompt).toContain(
       '한 줄 요약 뒤에는 결론을 반복하는 문장을 추가하지 않는다.',
     );
