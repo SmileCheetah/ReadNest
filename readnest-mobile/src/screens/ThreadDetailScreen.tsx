@@ -25,6 +25,7 @@ import { getSummaryPresentation } from "../components/summary/summaryPresentatio
 type Props = {
   thread: SavedThread;
   onBack: () => void;
+  onMarkReadOnOpen: (thread: SavedThread) => void | Promise<void>;
   onToggleReadStatus: (thread: SavedThread) => void;
   onMarkReadLater: (thread: SavedThread) => void;
   onRetrySummary: (thread: SavedThread) => void | Promise<void>;
@@ -73,12 +74,18 @@ function CollapsibleSection({
 export function ThreadDetailScreen({
   thread,
   onBack,
+  onMarkReadOnOpen,
   onToggleReadStatus,
   onMarkReadLater,
   onRetrySummary,
   onShareSummary,
   onDelete,
 }: Props) {
+  useEffect(() => {
+    if (thread.readStatus !== "UNREAD") return;
+    void onMarkReadOnOpen(thread);
+  }, [onMarkReadOnOpen, thread.id, thread.readStatus]);
+
   const [showSource, setShowSource] = useState(false);
   const [copyState, setCopyState] = useState<
     "idle" | "copying" | "copied" | "failed"
