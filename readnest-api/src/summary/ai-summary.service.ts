@@ -101,6 +101,8 @@ export const SUMMARY_EDITOR_PROMPT = `너는 사용자가 저장한 글을 나�
 - 결국 글이 말하고 싶은 핵심은 무엇인가?
 `;
 
+export const MAX_ARTICLE_TITLE_LENGTH = 191;
+
 export function buildSummaryPrompt(source: string) {
   return `${SUMMARY_EDITOR_PROMPT}\n\n다음 글을 요약해줘.\n\n${source}`;
 }
@@ -156,7 +158,7 @@ export class AiSummaryService {
     summaryMarkdown: string,
     input: { url: string; title?: string | null; text: string },
   ): SummaryResult {
-    const title = input.title?.trim() || this.createTitleFromUrl(input.url);
+    const title = this.resolveArticleTitle(summaryMarkdown, input);
     const firstParagraph = summaryMarkdown.split(/\n\s*\n/)[0]?.trim() ?? '';
     const meta: StructuredSummaryResult = {
       summaryType: '자유 형식 요약',
@@ -190,5 +192,32 @@ export class AiSummaryService {
     } catch {
       return '저장된 Thread';
     }
+  }
+
+  private resolveArticleTitle(
+    summaryMarkdown: string,
+    input: { url: string; title?: string | null },
+  ) {
+    const markdownTitle = summaryMarkdown.match(/^#\s+(.+?)\s*$/m)?.[1];
+    const candidate =
+      markdownTitle?.trim() ||
+      input.title?.trim() ||
+      this.createTitleFromUrl(input.url);
+
+    return this.truncateArticleTitle(this.toPlainTitle(candidate));
+  }
+
+  private toPlainTitle(value: string) {
+    return value
+      .replace(/\*\*|__|[*_`]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private truncateArticleTitle(value: string) {
+    const characters = Array.from(value);
+    if (characters.length <= MAX_ARTICLE_TITLE_LENGTH) return value;
+
+    return `${characters.slice(0, MAX_ARTICLE_TITLE_LENGTH - 1).join('')}…`;
   }
 }

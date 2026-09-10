@@ -43,7 +43,7 @@ describe('AiSummaryService', () => {
   }
 
   it('sends the summary-editor prompt and stores Luna output as Markdown', async () => {
-    const service = createService('# 제목\n\n원문에 충실한 요약이다.');
+    const service = createService('# 요약 제목\n\n원문에 충실한 요약이다.');
     const result = await service.summarize(input);
     const create = service.client.responses.create;
 
@@ -51,10 +51,24 @@ describe('AiSummaryService', () => {
       model: 'gpt-5.6-luna',
       input: buildSummaryPrompt('원문 내용이다.'),
     });
-    expect(result.summary).toBe('# 제목\n\n원문에 충실한 요약이다.');
+    expect(result.summary).toBe('# 요약 제목\n\n원문에 충실한 요약이다.');
     expect(result.meta.summaryMarkdown).toBe(result.summary);
+    expect(result.title).toBe('요약 제목');
+    expect(result.meta.title).toBe('요약 제목');
     expect(result.keyPoints).toEqual([]);
     expect(result.tags).toEqual([]);
+  });
+
+  it('uses a bounded fallback title when the Markdown has no h1', async () => {
+    const longTitle = '가'.repeat(250);
+    const result = await createService('요약 본문입니다.').summarize({
+      ...input,
+      title: longTitle,
+    });
+    const title = result.title as string;
+
+    expect(Array.from(title)).toHaveLength(191);
+    expect(title).toMatch(/…$/);
   });
 
   it('includes the requested principles, format, and source in the prompt', () => {
