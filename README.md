@@ -6,11 +6,15 @@ Threads에서 발견한 글을 저장하고, AI로 요약해 다시 읽을 수 �
 
 ## 문서
 
-- [원본 기획서](./docs/PROJECT_BRIEF.md)
-- [작업 기준 문서](./docs/WORKING_NOTES.md)
-- [MVP 구현 계획](./docs/MVP_PLAN.md)
+- [현재 제품·UX 개선 계획 및 감사 결과 (2026-09-29)](./docs/PRODUCT_UX_IMPROVEMENT_PLAN.md)
+- [현행 단일 Markdown 요약 계약](./docs/RICH_MARKDOWN_SUMMARY_PLAN.md)
+- [원본 기획서 — 초기 비전](./docs/PROJECT_BRIEF.md)
+- [과거 작업 기준 — 이력 참고용](./docs/WORKING_NOTES.md)
+- [초기 MVP 구현 계획 — 이력 참고용](./docs/MVP_PLAN.md)
 - [진행상황 기록](./docs/PROGRESS_LOG.md)
-- [남은 작업 정리](./docs/REMAINING_WORK.md)
+- [과거 남은 작업 정리 — 2026-07-14 기준](./docs/REMAINING_WORK.md)
+
+현재 우선순위는 제품·UX 개선 계획, 요약 본문 계약은 단일 Markdown 요약 문서를 확인합니다. 개선 계획의 제안은 아직 구현·배포된 기능이 아닙니다. 과거 문서의 고정 3개 포인트, V1 fallback, Gemini/웹 프론트 지침은 현재 기준이 아닙니다.
 
 ## 현재 결정 사항
 
@@ -29,10 +33,12 @@ Threads에서 발견한 글을 저장하고, AI로 요약해 다시 읽을 수 �
 - 사용자별 Threads URL 저장, 목록, 상세, 삭제
 - 중복 URL 방지와 읽음 상태 관리
 - Redis/BullMQ 기반 비동기 요약 큐
-- OpenAI Responses API 기반 AI 요약과 fallback 요약
+- OpenAI Responses API 기반 단일 Markdown 요약 (실패 시 오류·재시도, 대체 요약 없음)
 - Playwright/fetch 기반 원문 추출
 - React Native 앱의 홈, 아카이브, 상세, 설정 화면
 - 요약 복사, OS 공유, 재시도 버튼 1차 구현
+
+위 목록은 구현된 기능의 존재를 뜻하며 전체 운영 검증 완료를 뜻하지 않습니다. 2026-09-29 코드 감사에서 확인한 상태 추적·읽음·원문 중복·작업 정합성 문제와 검증 범위는 [개선 계획](./docs/PRODUCT_UX_IMPROVEMENT_PLAN.md)에 기록했습니다. OS 공유 기능과 다른 앱의 공유 시트에서 들어오는 share target은 별도로 검증합니다.
 
 ## 로컬 실행
 

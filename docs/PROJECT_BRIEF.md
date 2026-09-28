@@ -1,5 +1,7 @@
 # 프로젝트 기획서
 
+> **초기 비전 / 이력 참고용.** 플랫폼 범위·공유 저장·요약 구조 등의 초기 아이디어를 보존합니다. 아래 내용은 현재 구현 완료를 뜻하지 않으며, 지금의 작업 기준과 후속 제안은 [제품·UX 개선 계획](PRODUCT_UX_IMPROVEMENT_PLAN.md), 요약 본문 계약은 [통합 Markdown 요약 설계](RICH_MARKDOWN_SUMMARY_PLAN.md)를 확인합니다.
+
 # 프로젝트명
 
 ReadNest

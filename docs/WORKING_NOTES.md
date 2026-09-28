@@ -1,6 +1,6 @@
 # ReadNest 작업 기준 문서
 
-이 문서는 ReadNest를 개발할 때 매번 먼저 확인할 기준 문서입니다. 원본 기획서는 `docs/PROJECT_BRIEF.md`에 보관하고, 실제 구현 판단은 이 문서를 우선 기준으로 삼습니다.
+> **Superseded / 과거 작업 기록 (2026-09-29 정리).** 이 문서는 더 이상 구현 판단의 최우선 기준이 아닙니다. 현재 제품·작업 우선순위는 [제품·UX 개선 계획](PRODUCT_UX_IMPROVEMENT_PLAN.md), 요약 계약은 [통합 Markdown 요약 설계](RICH_MARKDOWN_SUMMARY_PLAN.md)를 따릅니다. 아래의 옛 스택·미완료 목록·요약 형식은 당시 기록으로 보존하며 재구현 지시로 사용하지 않습니다.
 
 ## 프로젝트 핵심
 

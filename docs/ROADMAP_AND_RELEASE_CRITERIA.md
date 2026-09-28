@@ -1,5 +1,7 @@
 # ReadNest 향후 개발 계획과 최종 배포 기준
 
+> **Superseded / 과거 로드맵 (2026-09-29 정리).** 현행 우선순위·검증 게이트는 [제품·UX 개선 계획](PRODUCT_UX_IMPROVEMENT_PLAN.md)을 사용합니다. 아래의 Gemini, 구조화 JSON/유형별 UI, 고정 항목 수, 현재 완료 상태는 과거 기록이며 현재 출시 기준이 아닙니다. 요약 형식은 [통합 Markdown 요약 설계](RICH_MARKDOWN_SUMMARY_PLAN.md)가 우선합니다.
+
 ## 현재 상태
 
 ReadNest는 현재 Threads 링크 저장, 원문 추출, Gemini 요약, 아카이브/상세 화면 표시까지 MVP 핵심 흐름이 연결된 상태입니다.
