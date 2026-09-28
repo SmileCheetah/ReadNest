@@ -9,7 +9,7 @@
 - Surface adapter: product-ui
 - Domain: content
 - Page type: detail
-- Brand recipe: native-mobile
+- Brand recipe: editorial-authority
 - Palette recipe: editorial-ink
 - Generated palette: #0075DE · light · calm · tonal
 - Aesthetic profile: none
@@ -194,25 +194,24 @@ client/model exposure. No candidate may automatically modify project or core rul
 
 ---
 
-## `native-mobile`
+## `editorial-authority`
 
-- **Best fit:** focused mobile utilities, capture, communication, media, and one-handed tasks.
-  Compatible with any grammar whose primary surface is a mobile app.
-- **Containment:** content is primary; navigation and controls recede into platform-familiar
-  bars, sheets, lists, and grouped regions.
-- **Geometry:** platform-aware radii and materials, 16–20px screen gutters, touch targets at
-  least 44px, no desktop card grid squeezed into a phone.
-- **Type/icons:** dynamic type and platform conventions; system symbols when licensed for the
-  target platform, otherwise one consistent open icon family.
-- **Controls/collections:** few visible controls, secondary actions disclosed nearby, common
-  gestures have visible alternatives, important actions remain reachable.
-- **Motion/responsive:** adapt to orientation, dark mode, text scaling, and device insets;
-  transitions preserve spatial continuity.
-- **Characteristic move:** one content-first task with controls concentrated in the reachable
-  middle or lower region.
-- **Reject:** decorative glass imitation, copying Apple assets, invisible gesture-only actions,
-  tiny targets, or a web navbar pretending to be native.
-- **Lineage:** [Apple Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines).
+- **Best fit:** journalism, reports, research, policy, and documentation. Strong with
+  `editorial-reading`; usable for evidence-heavy `expressive-marketing`.
+- **Containment:** type, whitespace, rules, captions, and bounded columns replace app cards.
+  Chrome recedes after orientation.
+- **Geometry:** 0–4px radius, hairline rules, little or no shadow, generous section rhythm and
+  45–90 character reading measures.
+- **Type/icons:** deliberate display/body roles, serif optional and role-specific, captions and
+  sources remain attached to evidence.
+- **Controls/collections:** calm inline actions, table of contents, footnotes, save/share,
+  figures, pull quotes, and related context after the narrative.
+- **Motion/responsive:** reading position and disclosure only; narrow screens preserve hierarchy
+  and source relationships rather than stacking arbitrary cards.
+- **Characteristic move:** an authoritative opening promise followed by inspectable evidence.
+- **Reject:** dashboard chrome around prose, every section in a card, overly wide measure, serif
+  everywhere, fake print texture, or interruption-heavy interactions.
+- **Lineage:** StyleSeed editorial research and public-content accessibility guidance.
 
 ---
 

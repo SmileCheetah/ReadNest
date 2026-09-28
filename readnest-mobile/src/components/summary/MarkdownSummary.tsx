@@ -104,10 +104,12 @@ export function MarkdownSummary({
   markdown,
   titleFallback,
   afterIntro,
+  showTitle = true,
 }: {
   markdown: string;
   titleFallback?: string;
   afterIntro?: ReactNode;
+  showTitle?: boolean;
 }) {
   const blocks = useMemo(() => parseMarkdown(markdown), [markdown]);
   const collapsed = useMemo(() => getCollapsedBlocks(blocks), [blocks]);
@@ -118,13 +120,15 @@ export function MarkdownSummary({
   const opening = splitDocumentOpening(visible);
   return (
     <View>
-      {opening.title ? (
-        <RenderBlock block={opening.title} />
-      ) : titleFallback ? (
-        <Text selectable accessibilityRole="header" style={styles.h1}>
-          {titleFallback}
-        </Text>
-      ) : null}
+      {showTitle
+        ? opening.title
+          ? <RenderBlock block={opening.title} />
+          : titleFallback
+            ? <Text selectable accessibilityRole="header" style={styles.h1}>
+                {titleFallback}
+              </Text>
+            : null
+        : null}
       {opening.intro ? <RenderBlock block={opening.intro} opening /> : null}
       {afterIntro}
       {opening.remainder.map((block, index) => (

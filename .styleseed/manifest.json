@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "engineVersion": "4.1.0",
   "engineRevision": "sha256:f563a15b158ecef506f213c45ef54a71b34b4b1410c92529673b97ab34840772",
-  "generatedAt": "2026-09-28T19:04:34.271Z",
+  "generatedAt": "2026-09-28T21:14:16.514Z",
   "selection": {
     "agent": "codex",
     "grammar": "editorial-reading",
@@ -12,8 +12,8 @@
     "adapter": "product-ui",
     "domain": "content",
     "page": "detail",
-    "recipe": "native-mobile",
-    "recipeSelection": "native-mobile",
+    "recipe": "editorial-authority",
+    "recipeSelection": "editorial-authority",
     "palette": "editorial-ink",
     "paletteSelection": "editorial-ink",
     "paletteGeneration": {
@@ -28,15 +28,15 @@
   "bundle": {
     "kind": "bundle",
     "path": ".styleseed/effective-rules.md",
-    "sha256": "a688af571088136a6ee7ddd344fee1955383b0577e7c8ab8176f20c91174e0e3",
-    "bytes": 17368
+    "sha256": "d6aa4ef5ec5c8b88dcfd08ac2f3c2e7e50028de6b8627ff0abfd1c4dd12bf170",
+    "bytes": 17306
   },
   "outputs": [
     {
       "kind": "bundle",
       "path": ".styleseed/effective-rules.md",
-      "sha256": "a688af571088136a6ee7ddd344fee1955383b0577e7c8ab8176f20c91174e0e3",
-      "bytes": 17368
+      "sha256": "d6aa4ef5ec5c8b88dcfd08ac2f3c2e7e50028de6b8627ff0abfd1c4dd12bf170",
+      "bytes": 17306
     },
     {
       "kind": "palette-json",
@@ -98,8 +98,8 @@
     },
     {
       "id": "recipe",
-      "sha256": "96773594ff06c38e68e51252dda7ffa7095111973bc8811755d1ad7296db87cc",
-      "bytes": 1317
+      "sha256": "97634faa4de0c7d681d5708fd420276618eef2e96f420d0e2770d9649cc06e27",
+      "bytes": 1249
     },
     {
       "id": "palette",

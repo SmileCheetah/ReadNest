@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -21,6 +21,7 @@ import { colors, radius, spacing } from "../theme/tokens";
 import {
   isSupportedMarkdown,
   MarkdownSummary,
+  parseMarkdown,
 } from "../components/summary/MarkdownSummary";
 import {
   getSummaryErrorMessage,
@@ -77,6 +78,7 @@ export function ThreadDetailScreen({
   );
   const menuTriggerRef = useRef<View>(null);
   const menuFirstItemRef = useRef<View>(null);
+  const scrollRef = useRef<ScrollView>(null);
   const previousMenuOpen = useRef(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copySequence = useRef(0);
@@ -110,7 +112,17 @@ export function ThreadDetailScreen({
   const knownSource =
     thread.sourceCompleteness === "PARTIAL" ||
     thread.sourceCompleteness === "COMPLETE";
-  const title = meta?.title?.trim() || thread.title || "저장한 글";
+  const markdownTitle = useMemo(() => {
+    const firstSummaryBlock = summaryMarkdown
+      ? parseMarkdown(summaryMarkdown)[0]
+      : undefined;
+    return firstSummaryBlock?.type === "heading" &&
+      firstSummaryBlock.level === 1
+      ? firstSummaryBlock.text?.trim()
+      : undefined;
+  }, [summaryMarkdown]);
+  const title =
+    markdownTitle || meta?.title?.trim() || thread.title || "저장한 글";
 
   useEffect(() => {
     if (readEntry.current.id !== thread.id)
@@ -119,6 +131,10 @@ export function ThreadDetailScreen({
     readEntry.current.consumed = true;
     if (thread.readStatus === "UNREAD") void onMarkReadOnOpen(thread);
   }, [onMarkReadOnOpen, summaryMarkdown, thread.id, thread.readStatus]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [thread.id]);
 
   useEffect(() => {
     copySequence.current += 1;
@@ -228,8 +244,8 @@ export function ThreadDetailScreen({
     readEntry.current = { id: thread.id, consumed: true };
     action(thread);
   };
-  const actions = (
-    <View style={styles.actions}>
+  const primaryAction = (
+    <View style={styles.summaryActions}>
       {originalUrl ? (
         <Pressable
           accessibilityRole="button"
@@ -243,28 +259,28 @@ export function ThreadDetailScreen({
       ) : (
         <Text style={styles.metaLine}>원문 링크가 없습니다.</Text>
       )}
-      {summaryMarkdown ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={copyState === "copied" ? "복사됨" : "요약 복사"}
-          accessibilityState={{ disabled: copyState === "copying" }}
-          disabled={copyState === "copying"}
-          style={styles.copyButton}
-          onPress={() => void copy()}
-        >
-          <Text style={styles.copyText}>
-            {copyState === "copied"
-              ? "✓ 복사됨"
-              : copyState === "copying"
-                ? "복사 중"
-                : copyState === "failed"
-                  ? "다시 복사"
-                  : "복사"}
-          </Text>
-        </Pressable>
-      ) : null}
     </View>
   );
+  const copyAction = summaryMarkdown ? (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={copyState === "copied" ? "복사됨" : "요약 복사"}
+      accessibilityState={{ disabled: copyState === "copying" }}
+      disabled={copyState === "copying"}
+      style={styles.copyButton}
+      onPress={() => void copy()}
+    >
+      <Text style={styles.copyText}>
+        {copyState === "copied"
+          ? "✓ 복사됨"
+          : copyState === "copying"
+            ? "복사 중"
+            : copyState === "failed"
+              ? "다시 복사"
+              : "복사"}
+      </Text>
+    </Pressable>
+  ) : null;
   const retryAction = (
     <Pressable
       accessibilityRole="button"
@@ -314,6 +330,7 @@ export function ThreadDetailScreen({
           </Pressable>
         </View>
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
@@ -366,18 +383,34 @@ export function ThreadDetailScreen({
               </Text>
             </View>
           ) : null}
-          {summaryMarkdown ? (
-            <MarkdownSummary
-              key={thread.id}
-              markdown={summaryMarkdown}
-              titleFallback={title}
-              afterIntro={actions}
-            />
-          ) : (
-            <View>
-              <Text accessibilityRole="header" style={styles.title}>
-                {title}
-              </Text>
+          <Text accessibilityRole="header" style={styles.title}>
+            {title}
+          </Text>
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryHeader}>
+              <View style={styles.summaryIdentity}>
+                <Ionicons
+                  accessible={false}
+                  importantForAccessibility="no"
+                  name="sparkles-outline"
+                  size={24}
+                  color={colors.primary}
+                />
+                <Text accessibilityRole="header" style={styles.summaryHeading}>
+                  AI 요약
+                </Text>
+              </View>
+              {copyAction}
+            </View>
+            {summaryMarkdown ? (
+              <MarkdownSummary
+                key={thread.id}
+                markdown={summaryMarkdown}
+                titleFallback={title}
+                afterIntro={primaryAction}
+                showTitle={false}
+              />
+            ) : (
               <View style={styles.stateBlock} accessibilityLiveRegion="polite">
                 {loadingDetail ? (
                   <>
@@ -418,9 +451,9 @@ export function ThreadDetailScreen({
                   </>
                 )}
               </View>
-              {actions}
-            </View>
-          )}
+            )}
+            {!summaryMarkdown ? primaryAction : null}
+          </View>
           {summaryMarkdown && thread.tags.length ? (
             <View style={styles.tags}>
               {thread.tags.slice(0, 3).map((tag) => (
@@ -570,13 +603,14 @@ export function ThreadDetailScreen({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.surface },
+  root: { flex: 1, backgroundColor: colors.canvas },
   screen: { flex: 1 },
   appbar: {
     minHeight: 56,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: spacing.sm,
+    backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.hairline,
   },
@@ -594,7 +628,7 @@ const styles = StyleSheet.create({
   },
   spacer: { flex: 1 },
   content: {
-    padding: spacing.lg,
+    padding: spacing.md,
     paddingBottom: spacing.xl,
     maxWidth: 720,
     width: "100%",
@@ -616,17 +650,42 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   body: { color: colors.inkSoft, fontSize: 16, lineHeight: 27, flexShrink: 1 },
-  actions: {
+  summaryCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+  },
+  summaryHeader: {
+    minHeight: 44,
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
     alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  summaryIdentity: {
+    minWidth: 0,
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  summaryHeading: {
+    color: colors.primary,
+    fontSize: 18,
+    lineHeight: 26,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  summaryActions: {
     marginTop: spacing.sm,
     marginBottom: spacing.lg,
   },
   primaryCta: {
     minHeight: 48,
-    flexGrow: 1,
+    width: "100%",
     borderRadius: radius.md,
     backgroundColor: colors.primary,
     flexDirection: "row",
@@ -643,20 +702,18 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   copyButton: {
-    minWidth: 64,
-    minHeight: 48,
-    paddingHorizontal: spacing.md,
+    minWidth: 60,
+    minHeight: 44,
+    paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm,
     alignItems: "center",
     justifyContent: "center",
   },
   copyText: { color: colors.primary, fontSize: 15, fontWeight: "600" },
   stateBlock: {
-    backgroundColor: colors.surfaceLow,
-    borderRadius: radius.md,
-    padding: spacing.md,
     gap: spacing.sm,
-    marginVertical: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.sm,
   },
   stateTitle: {
     color: colors.ink,

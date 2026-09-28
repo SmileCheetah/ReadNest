@@ -89,7 +89,7 @@ afterEach(async () => {
   jest.clearAllMocks();
 });
 
-it("renders one title, introduction, actions and body without old summary cards", async () => {
+it("renders one title, introduction, actions and body inside one AI summary surface", async () => {
   const tree = await render(React.createElement(ThreadDetailScreen, props()));
   const output = text(tree);
   expect(output).toContain("문서 제목");
@@ -97,9 +97,26 @@ it("renders one title, introduction, actions and body without old summary cards"
   expect(output).not.toContain("핵심 한 줄 요약");
   expect(output).not.toContain("분석 정보");
   expect(output).not.toContain("완결");
+  expect(output.match(/AI 요약/g)).toHaveLength(1);
   expect(output.indexOf("원문 보기")).toBeLessThan(
     output.indexOf("이유를 설명합니다."),
   );
+});
+
+it("falls back to the saved title once when Markdown has no document heading", async () => {
+  const tree = await render(
+    React.createElement(
+      ThreadDetailScreen,
+      props({
+        ...article,
+        summaryMeta: {
+          ...article.summaryMeta,
+          summaryMarkdown: "핵심 주장입니다.\n\n### 근거\n\n이유를 설명합니다.",
+        },
+      }),
+    ),
+  );
+  expect(text(tree).match(/목록 제목/g)).toHaveLength(1);
 });
 
 it("marks read only after a valid document is displayed and only once per entry", async () => {
