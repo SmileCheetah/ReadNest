@@ -3,12 +3,15 @@ import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { config } from 'dotenv';
 import { AppModule } from './app.module';
 import { validateRuntimeEnv } from './config/runtime-env';
+import { developmentWebCors } from './config/development-web-cors';
 
 async function bootstrap() {
   config({ quiet: true });
   validateRuntimeEnv();
 
   const app = await NestFactory.create(AppModule);
+  const cors = developmentWebCors(process.env.NODE_ENV);
+  if (cors) app.enableCors(cors);
   app.setGlobalPrefix('api', {
     exclude: [
       { path: '/', method: RequestMethod.GET },
