@@ -1,0 +1,2 @@
+# Preserve resolver output byte-for-byte so the design manifest remains verifiable.
+.styleseed/effective-rules.md whitespace=-blank-at-eof

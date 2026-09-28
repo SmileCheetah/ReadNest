@@ -1,0 +1,20 @@
+[
+  { "name": "Korean document with headings and emphasis", "markdown": "# 핵심 제목\n\n**중요한 주장**을 설명합니다.\n\n### 근거\n\n조건에 따라 결과는 달라집니다.", "valid": true },
+  { "name": "Inline pipes are prose, not a table", "markdown": "A | B | C 중 조건에 맞는 것을 선택한다.", "valid": true },
+  { "name": "Original ordered list numbers", "markdown": "3. 데이터 관리\n4. 시스템 설계\n\n7. 운영", "valid": true },
+  { "name": "Bold numbered item heading", "markdown": "**2. 데이터 관리**\n저장과 정합성을 고려한다.", "valid": true },
+  { "name": "Bullets and quotation", "markdown": "- 첫 번째 근거\n- 두 번째 근거\n\n> **조건을 보존한다.**", "valid": true },
+  { "name": "Korean and technical names", "markdown": "C/C++과 CUDA는 고성능 연산을, Python은 호출 인터페이스를 담당한다.", "valid": true },
+  { "name": "Soft and hard breaks", "markdown": "첫 문장\n이어지는 문장  \n다음 줄\\\n명시적인 다음 줄", "valid": true },
+  { "name": "Unbalanced bold is harmless text", "markdown": "일부 **표시가 닫히지 않아도 내용을 버리지 않는다.", "valid": true },
+  { "name": "Whitespace only", "markdown": "  \n ", "valid": false },
+  { "name": "Raw HTML", "markdown": "<script>alert(1)</script>", "valid": false },
+  { "name": "Iframe", "markdown": "<iframe src=\"https://example.com\"></iframe>", "valid": false },
+  { "name": "Markdown image", "markdown": "![picture](https://example.com/picture.png)", "valid": false },
+  { "name": "Table row", "markdown": "| A | B |\n| --- | --- |\n| 1 | 2 |", "valid": false },
+  { "name": "Unbordered table separator", "markdown": "A | B\n--- | ---\n1 | 2", "valid": false },
+  { "name": "Code fence", "markdown": "```js\nalert(1)\n```", "valid": false },
+  { "name": "Unsupported deep heading", "markdown": "#### 너무 깊은 제목", "valid": false },
+  { "name": "Markdown links disabled in current contract", "markdown": "[원문](https://example.com)", "valid": false },
+  { "name": "Dangerous URL scheme", "markdown": "[클릭](javascript:alert(1))", "valid": false }
+]
