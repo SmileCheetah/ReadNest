@@ -32,6 +32,13 @@ enum ThreadGroupStatus {
   MERGED_SUMMARY_DONE
 }
 
+enum SummaryTaskState {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
 model User {
   id           String         @id @default(cuid())
   email        String         @unique
@@ -61,7 +68,17 @@ model SavedArticle {
   extractionStatus     String?
   extractionConfidence Float?
   summaryRetryCount    Int           @default(0)
+  retryWindowStartedAt DateTime?
   lastSummaryError     String?       @db.Text
+  generation           Int           @default(0)
+  resultGeneration     Int?
+  generatedAt          DateTime?
+  summaryPreview       String?       @db.Text
+  stage                String        @default("QUEUED")
+  errorCode            String?
+  retryable            Boolean       @default(true)
+  retryAt              DateTime?
+  sourceCompleteness   String        @default("UNKNOWN")
   processStatus        ProcessStatus @default(SAVED)
   readStatus           ReadStatus    @default(UNREAD)
   savedAt              DateTime      @default(now())
@@ -69,12 +86,36 @@ model SavedArticle {
   updatedAt            DateTime      @updatedAt
   user                 User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   threadParts          ThreadPart[]
+  summaryTasks         SummaryTask[]
 
   @@unique([userId, normalizedUrl])
   @@index([userId, savedAt])
   @@index([userId, processStatus])
   @@index([userId, readStatus])
   @@map("saved_articles")
+}
+
+// Durable dispatch record. Network calls never run inside the DB transaction.
+model SummaryTask {
+  id             String           @id @default(cuid())
+  articleId      String
+  generation     Int
+  requestKey     String?
+  state          SummaryTaskState @default(PENDING)
+  attempts       Int              @default(0)
+  notBefore      DateTime         @default(now())
+  leaseToken     String?
+  leaseExpiresAt DateTime?
+  result         Json?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  article        SavedArticle     @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, generation])
+  @@unique([articleId, requestKey])
+  @@index([state, notBefore])
+  @@index([state, leaseExpiresAt])
+  @@map("summary_tasks")
 }
 
 model ThreadGroup {

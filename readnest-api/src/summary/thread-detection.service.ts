@@ -17,7 +17,11 @@ export class ThreadDetectionService {
     title: string;
     url: string;
     text: string;
+    // Verified extraction evidence, not guessed from generated titles or body fractions.
+    rootPostId?: string;
+    authorId?: string;
   }) {
+    if (!input.rootPostId || !input.authorId) return null;
     const detected = this.detectPart(input.text || input.title);
 
     if (!detected) {
@@ -27,14 +31,14 @@ export class ThreadDetectionService {
     let group = await this.prisma.threadGroup.findFirst({
       where: {
         userId: input.userId,
-        title: input.title,
+        title: `${input.authorId}:${input.rootPostId}`,
       },
     });
 
     group ??= await this.prisma.threadGroup.create({
       data: {
         userId: input.userId,
-        title: input.title,
+        title: `${input.authorId}:${input.rootPostId}`,
         status: ThreadGroupStatus.PARTIAL,
       },
     });

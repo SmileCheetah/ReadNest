@@ -7,6 +7,7 @@ import {
   IsString,
   Max,
   Min,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -25,7 +26,17 @@ export class ListArticlesQueryDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
   search?: string;
+
+  @IsOptional()
+  @IsIn(['cursor'])
+  pagination?: 'cursor';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  cursor?: string;
 
   @IsOptional()
   @Type(() => Number)

@@ -1,5 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { ContentExtractorService } from './content-extractor.service';
+import { safeSourceRequest } from './safe-source-http';
+jest.mock('./safe-source-http', () => ({ safeSourceRequest: jest.fn() }));
 
 describe('ContentExtractorService', () => {
   const service = new ContentExtractorService(new ConfigService());
@@ -48,5 +50,65 @@ wakeupmoon.ai
 `);
 
     expect(result).toBe('메인 글입니다.');
+  });
+
+  it('accepts short post metadata but rejects empty, login, or mismatched short source', async () => {
+    const extractor = new ContentExtractorService(new ConfigService());
+    jest
+      .spyOn(
+        extractor as unknown as {
+          extractThreadsWithBrowser: () => Promise<unknown>;
+        },
+        'extractThreadsWithBrowser',
+      )
+      .mockResolvedValue({ text: '', extractionStatus: 'FAILED' });
+    const post =
+      '짧아도 중요한 주장을 담은 글입니다. 길이가 아니라 실제 본문인지가 중요합니다.';
+    for (const metadata of [
+      '<meta property="og:url" content="https://www.threads.com/@author/post/AbC">',
+      '<link href="https://www.threads.com/@author/post/AbC" rel="canonical">',
+    ]) {
+      jest.mocked(safeSourceRequest).mockResolvedValue({
+        status: 200,
+        headers: {},
+        body: Buffer.from(
+          `${metadata}<meta property="og:description" content="${post}">`,
+        ),
+      });
+      const result = await extractor.extract(
+        'https://www.threads.com/@author/post/AbC',
+      );
+      expect(result.text).toBe(post);
+      expect(result.extractionStatus).toBe('FALLBACK_SUCCESS');
+      expect(result.sourceCompleteness).toBe('PARTIAL');
+    }
+    for (const description of [
+      '',
+      'Log in to Threads to continue',
+      '로그인하여 더 많은 답글을 확인해보세요.',
+    ]) {
+      jest.mocked(safeSourceRequest).mockResolvedValue({
+        status: 200,
+        headers: {},
+        body: Buffer.from(
+          `<meta property="og:url" content="https://www.threads.com/@author/post/AbC"><meta property="og:description" content="${description}">`,
+        ),
+      });
+      expect(
+        (await extractor.extract('https://www.threads.com/@author/post/AbC'))
+          .extractionStatus,
+      ).toBe('FAILED');
+    }
+    jest.mocked(safeSourceRequest).mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: Buffer.from(
+        `<meta property="og:url" content="https://www.threads.com/@author/post/Other"><meta property="og:description" content="${post}">`,
+      ),
+    });
+    expect(
+      (await extractor.extract('https://www.threads.com/@author/post/AbC'))
+        .extractionStatus,
+    ).toBe('FAILED');
   });
 });

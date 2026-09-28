@@ -6,6 +6,9 @@ export {
   validateSummaryMarkdown,
 } from './summary-markdown-validator';
 import { validateSummaryMarkdown } from './summary-markdown-validator';
+import { summaryPreview } from '../articles/utils/summary-preview';
+import { SummaryGenerationError } from './summary-errors';
+export { SummaryGenerationError } from './summary-errors';
 
 export type StructuredSummaryResult = {
   summaryType: string;
@@ -31,13 +34,6 @@ export type SummaryResult = {
   contextInsufficient: boolean;
   meta: StructuredSummaryResult;
 };
-
-export class SummaryGenerationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'SummaryGenerationError';
-  }
-}
 
 export const SUMMARY_EDITOR_PROMPT = `너는 사용자가 저장한 글을 나중에 다시 읽지 않아도 핵심 내용을 빠르게 이해할 수 있도록 정리하는 요약 에디터다.
 
@@ -122,13 +118,23 @@ export class AiSummaryService {
   constructor(configService: ConfigService) {
     const apiKey = configService.get<string>('OPENAI_API_KEY');
     this.model = configService.get<string>('OPENAI_MODEL') ?? 'gpt-5.6-luna';
-    this.client = apiKey ? new OpenAI({ apiKey }) : null;
+    this.client = apiKey
+      ? new OpenAI({ apiKey, timeout: 120000, maxRetries: 0 })
+      : null;
   }
 
   async summarize(input: { url: string; title?: string | null; text: string }) {
+    if (!input.text.trim())
+      throw new SummaryGenerationError(
+        '원문을 가져오지 못했습니다. 원문 접근 상태를 확인해 주세요.',
+        'EXTRACTION_FAILED',
+        true,
+      );
     if (!this.client) {
       throw new SummaryGenerationError(
         'AI 요약 설정이 필요합니다. 서버 설정을 확인한 뒤 다시 시도해 주세요.',
+        'AI_CONFIGURATION',
+        false,
       );
     }
 
@@ -143,19 +149,44 @@ export class AiSummaryService {
         this.logger.warn('Summary Markdown validation failed');
         throw new SummaryGenerationError(
           '요약 형식을 검증하지 못했습니다. 요약을 다시 생성해 주세요.',
+          'INVALID_MARKDOWN',
+          false,
         );
       }
 
       return this.normalizeSummary(summaryMarkdown, input);
     } catch (error) {
       if (error instanceof SummaryGenerationError) throw error;
-      this.logger.warn(
-        `OpenAI summary failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+      const providerError = error as {
+        status?: number;
+        headers?: { get?: (name: string) => string | null };
+      };
+      const status = providerError.status;
+      const transient =
+        status === undefined ||
+        status === 429 ||
+        status === 408 ||
+        status >= 500;
+      const rawDelay = providerError.headers?.get?.('retry-after');
+      const retryAfter = rawDelay
+        ? Number.isFinite(Number(rawDelay))
+          ? Number(rawDelay)
+          : (Date.parse(rawDelay) - Date.now()) / 1000
+        : 0;
+      const code =
+        status === 429
+          ? 'AI_RATE_LIMIT'
+          : transient
+            ? 'AI_UNAVAILABLE'
+            : 'AI_CONFIGURATION';
+      this.logger.warn(`OpenAI summary failed: ${code}`);
       throw new SummaryGenerationError(
-        'AI 요약 생성 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.',
+        transient
+          ? 'AI 요약 생성 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'
+          : 'AI 연결 설정을 확인해야 합니다. 운영자에게 문의해 주세요.',
+        code,
+        transient,
+        Number.isFinite(retryAfter) ? Math.max(0, Math.ceil(retryAfter)) : 0,
       );
     }
   }
@@ -165,7 +196,7 @@ export class AiSummaryService {
     input: { url: string; title?: string | null; text: string },
   ): SummaryResult {
     const title = this.resolveArticleTitle(summaryMarkdown, input);
-    const firstParagraph = summaryMarkdown.split(/\n\s*\n/)[0]?.trim() ?? '';
+    const firstParagraph = summaryPreview(summaryMarkdown) ?? '';
     const meta: StructuredSummaryResult = {
       summaryType: '자유 형식 요약',
       title,
@@ -176,8 +207,8 @@ export class AiSummaryService {
       tags: [],
       readingValue: '',
       caution: '',
-      contextStatus: '완결',
-      threadStatus: '해당 없음',
+      contextStatus: '불명확',
+      threadStatus: '확인하지 못함',
       confidence: 0,
       summaryMarkdown,
     };

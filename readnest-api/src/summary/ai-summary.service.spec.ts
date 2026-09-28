@@ -6,8 +6,22 @@ import {
   SummaryGenerationError,
   validateSummaryMarkdown,
 } from './ai-summary.service';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 describe('validateSummaryMarkdown', () => {
+  const sharedFixtures = JSON.parse(
+    readFileSync(
+      resolve(__dirname, '../../../fixtures/summary-markdown-contract.json'),
+      'utf8',
+    ),
+  ) as Array<{ name: string; markdown: string; valid: boolean }>;
+  it.each(sharedFixtures)(
+    '$name (shared frontend/backend contract)',
+    ({ markdown, valid }) => {
+      expect(validateSummaryMarkdown(markdown)).toBe(valid);
+    },
+  );
   it('accepts natural Markdown and rejects unsupported content', () => {
     expect(
       validateSummaryMarkdown(
@@ -55,6 +69,8 @@ describe('AiSummaryService', () => {
     expect(result.meta.summaryMarkdown).toBe(result.summary);
     expect(result.title).toBe('요약 제목');
     expect(result.meta.title).toBe('요약 제목');
+    expect(result.meta.oneLineSummary).toBe('원문에 충실한 요약이다.');
+    expect(result.meta.contextStatus).toBe('불명확');
     expect(result.keyPoints).toEqual([]);
     expect(result.tags).toEqual([]);
   });
@@ -112,6 +128,33 @@ describe('AiSummaryService', () => {
 
     await expect(service.summarize(input)).rejects.toBeInstanceOf(
       SummaryGenerationError,
+    );
+  });
+
+  it('does not invoke the provider with empty source', async () => {
+    const service = createService('# 답변\n\n내용');
+    await expect(service.summarize({ ...input, text: ' ' })).rejects.toEqual(
+      expect.objectContaining({ code: 'EXTRACTION_FAILED' }),
+    );
+    expect(service.client.responses.create).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes provider authentication from rate limiting and respects Retry-After', async () => {
+    const service = createService('');
+    service.client.responses.create.mockRejectedValue({ status: 401 });
+    await expect(service.summarize(input)).rejects.toEqual(
+      expect.objectContaining({ code: 'AI_CONFIGURATION', retryable: false }),
+    );
+    service.client.responses.create.mockRejectedValue({
+      status: 429,
+      headers: { get: () => '60' },
+    });
+    await expect(service.summarize(input)).rejects.toEqual(
+      expect.objectContaining({
+        code: 'AI_RATE_LIMIT',
+        retryable: true,
+        retryAfterSeconds: 60,
+      }),
     );
   });
 

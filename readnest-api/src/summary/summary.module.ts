@@ -7,6 +7,7 @@ import { SummaryController } from './summary.controller';
 import { SummaryProcessor } from './summary.processor';
 import { SummaryService } from './summary.service';
 import { ThreadDetectionService } from './thread-detection.service';
+import { SummaryJobService } from './summary-job.service';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { ThreadDetectionService } from './thread-detection.service';
   controllers: [SummaryController],
   providers: [
     SummaryService,
+    SummaryJobService,
     SummaryProcessor,
     ContentExtractorService,
     AiSummaryService,

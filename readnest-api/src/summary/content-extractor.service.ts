@@ -1,12 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { chromium } from 'playwright';
+import { parseThreadsUrl } from '../articles/utils/normalize-url';
+import { safeSourceRequest, type SourceBudget } from './safe-source-http';
+import { positiveInteger } from '../articles/utils/summary-preview';
 
 export type ExtractedContent = {
   title?: string;
   text: string;
   extractionStatus: 'SUCCESS' | 'FALLBACK_SUCCESS' | 'FAILED';
   extractionConfidence: number;
+  sourceCompleteness?: 'UNKNOWN' | 'PARTIAL' | 'COMPLETE';
 };
 
 @Injectable()
@@ -17,8 +21,16 @@ export class ContentExtractorService {
 
   async extract(url: string): Promise<ExtractedContent> {
     try {
+      url = parseThreadsUrl(url).canonical;
+      const budget: SourceBudget = {
+        remainingBytes: 8 * 1024 * 1024,
+        deadline: Date.now() + 45000,
+      };
       if (this.isThreadsUrl(url)) {
-        const renderedContent = await this.extractThreadsWithBrowser(url);
+        const renderedContent = await this.extractThreadsWithBrowser(
+          url,
+          budget,
+        );
 
         if (renderedContent.text.length > 200) {
           return renderedContent;
@@ -29,19 +41,13 @@ export class ContentExtractorService {
         );
       }
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (compatible; ReadNestBot/0.1; +https://readnest.local)',
-          Accept: 'text/html,application/xhtml+xml',
-        },
-      });
+      const response = await safeSourceRequest(url, { budget });
 
-      if (!response.ok) {
+      if (response.status < 200 || response.status >= 300) {
         throw new Error(`Fetch failed with status ${response.status}`);
       }
 
-      const html = await response.text();
+      const html = response.body.toString('utf8');
       const title =
         this.extractMeta(html, 'og:title') ??
         this.extractTagContent(html, 'title') ??
@@ -50,57 +56,119 @@ export class ContentExtractorService {
         this.extractMeta(html, 'og:description') ??
         this.extractMeta(html, 'description') ??
         '';
-      const bodyText = this.extractBodyText(html);
-      const text = [description, bodyText]
-        .filter(Boolean)
-        .join('\n\n')
-        .slice(0, 12000);
+      // Fallback metadata is safer than treating every comment/navigation label as source.
+      const text = this.cleanThreadsText(description).slice(0, 12000);
+      const isAccessScreen =
+        /^(?:log in|login|sign up|join threads|로그인|가입하기|페이지를 찾을 수 없|요청한 페이지|sorry[,!]?|content (?:isn't|is not) available)/i.test(
+          text,
+        );
+      // Length is not evidence: a legitimate short post remains usable when its
+      // metadata identifies the requested post. Never treat a login/error page as it.
+      const metadataUrl =
+        this.extractMeta(html, 'og:url') ?? this.extractCanonicalUrl(html);
+      let samePost = false;
+      if (metadataUrl) {
+        try {
+          samePost =
+            parseThreadsUrl(metadataUrl).identity ===
+            parseThreadsUrl(url).identity;
+        } catch {
+          /* Non-post metadata is not source evidence. */
+        }
+      }
+      const usable = Boolean(
+        text &&
+        !isAccessScreen &&
+        (samePost || (!metadataUrl && text.length > 80)),
+      );
 
       return {
         title,
         text,
-        extractionStatus: text.length > 80 ? 'FALLBACK_SUCCESS' : 'FAILED',
-        extractionConfidence: text.length > 80 ? 0.55 : 0.15,
+        extractionStatus: usable ? 'FALLBACK_SUCCESS' : 'FAILED',
+        extractionConfidence: usable ? 0.55 : 0.15,
+        sourceCompleteness: usable ? 'PARTIAL' : 'UNKNOWN',
       };
-    } catch (error) {
-      this.logger.warn(
-        `Content extraction failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    } catch {
+      this.logger.warn('Content extraction failed; no source returned.');
 
       return {
         text: '',
         extractionStatus: 'FAILED',
         extractionConfidence: 0,
+        sourceCompleteness: 'UNKNOWN',
       };
     }
   }
 
   private async extractThreadsWithBrowser(
     url: string,
+    budget: SourceBudget,
   ): Promise<ExtractedContent> {
     let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
 
     try {
-      browser = await this.launchBrowser();
+      browser = await this.launchBrowser(budget.deadline);
 
       const page = await browser.newPage({
+        serviceWorkers: 'block',
         locale: 'ko-KR',
         userAgent:
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36',
       });
 
-      await page.goto(url, {
-        waitUntil: 'networkidle',
-        timeout: Number(
-          this.configService.get<string>('PLAYWRIGHT_PAGE_TIMEOUT_MS') ?? 45000,
-        ),
+      // Intercept *all* browser traffic, including redirects/subresources, and pin DNS.
+      await page.context().route('**/*', async (route) => {
+        const req = route.request();
+        if (
+          ['image', 'media', 'font', 'websocket'].includes(
+            req.resourceType(),
+          ) ||
+          !['GET', 'POST'].includes(req.method())
+        ) {
+          await route.abort();
+          return;
+        }
+        try {
+          const response = await safeSourceRequest(req.url(), {
+            budget,
+            subresource: !req.isNavigationRequest(),
+            method: req.method() as 'GET' | 'POST',
+            body: req.postData() ?? undefined,
+            contentType: req.headers()['content-type'],
+          });
+          await route.fulfill({
+            status: response.status,
+            headers: response.headers,
+            body: response.body,
+          });
+        } catch {
+          await route.abort().catch(() => undefined);
+        }
       });
+      await page.context().routeWebSocket('**/*', (socket) => socket.close());
 
-      const scrollCount = Number(
-        this.configService.get<string>('PLAYWRIGHT_SCROLL_COUNT') ?? 3,
+      await page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: Math.max(1, Math.min(30000, budget.deadline - Date.now())),
+      });
+      await page.waitForTimeout(1000);
+
+      const scrollCount = Math.min(
+        5,
+        Math.max(
+          0,
+          Number(
+            this.configService.get<string>('PLAYWRIGHT_SCROLL_COUNT') ?? 3,
+          ),
+        ),
       );
 
-      for (let index = 0; index < scrollCount; index += 1) {
+      for (
+        let index = 0;
+        index < scrollCount && Date.now() < budget.deadline - 1500;
+        index += 1
+      ) {
         await page.mouse.wheel(0, 1400);
         await page.waitForTimeout(700);
       }
@@ -109,12 +177,18 @@ export class ContentExtractorService {
       const bodyText = await page
         .locator('body')
         .innerText({
-          timeout: 5000,
+          timeout: Math.max(1, Math.min(5000, budget.deadline - Date.now())),
         })
         .catch(() => '');
       const cleanedText = this.cleanThreadsText(bodyText).slice(
         0,
-        Number(this.configService.get<string>('EXTRACT_TEXT_LIMIT') ?? 50000),
+        Math.min(
+          50000,
+          positiveInteger(
+            this.configService.get<string>('EXTRACT_TEXT_LIMIT'),
+            50000,
+          ),
+        ),
       );
       const hasUsefulText = cleanedText.length > 200;
 
@@ -123,12 +197,16 @@ export class ContentExtractorService {
         text: cleanedText,
         extractionStatus: hasUsefulText ? 'SUCCESS' : 'FAILED',
         extractionConfidence: hasUsefulText ? 0.9 : 0.2,
+        // body text alone cannot prove same-author/root ownership or complete collection.
+        sourceCompleteness: /로그인하여 더 많은 답글|로그인 또는 가입/.test(
+          bodyText,
+        )
+          ? 'PARTIAL'
+          : 'UNKNOWN',
       };
-    } catch (error) {
+    } catch {
       this.logger.warn(
-        `Threads browser extraction failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        'Threads browser extraction failed; using bounded fallback if budget remains.',
       );
 
       return {
@@ -141,11 +219,12 @@ export class ContentExtractorService {
     }
   }
 
-  private async launchBrowser() {
+  private async launchBrowser(deadline: number) {
     const channel = this.configService.get<string>('PLAYWRIGHT_CHANNEL');
     const launchOptions = {
       headless: true,
       args: ['--disable-dev-shm-usage', '--no-sandbox'],
+      timeout: Math.max(1, Math.min(8000, deadline - Date.now())),
     };
 
     if (channel) {
@@ -154,11 +233,9 @@ export class ContentExtractorService {
           ...launchOptions,
           channel,
         });
-      } catch (error) {
+      } catch {
         this.logger.warn(
-          `Playwright launch with channel failed, retrying bundled Chromium: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          'Playwright channel unavailable; retrying bundled Chromium.',
         );
       }
     }
@@ -198,6 +275,16 @@ export class ContentExtractorService {
       new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i'),
     );
     return match?.[1] ? this.decodeHtml(match[1]).trim() : null;
+  }
+
+  private extractCanonicalUrl(html: string): string | null {
+    const links = html.match(/<link\b[^>]*>/gi) ?? [];
+    for (const link of links) {
+      if (!/\brel\s*=\s*["']canonical["']/i.test(link)) continue;
+      const href = link.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+      if (href) return this.decodeHtml(href);
+    }
+    return null;
   }
 
   private extractBodyText(html: string) {
@@ -254,10 +341,8 @@ export class ContentExtractorService {
       /^조회\s/,
       /^·$/,
       /^작성자$/,
-      /^@?[\w.]{2,40}$/,
       /^\d+\s*(초|분|시간|일|주)$/,
       /^(방금|어제|오늘)$/,
-      /^\d+$/,
       /^답글 남기기/,
       /님에게 답글 남기기/,
     ];
@@ -268,7 +353,7 @@ export class ContentExtractorService {
       .filter(Boolean);
     const cleanedLines: string[] = [];
 
-    for (const line of lines) {
+    for (const [index, line] of lines.entries()) {
       if (stopPatterns.some((pattern) => pattern.test(line))) {
         break;
       }
@@ -276,6 +361,11 @@ export class ContentExtractorService {
       if (noisePatterns.some((pattern) => pattern.test(line))) {
         continue;
       }
+      if (
+        /^@?[\w.]{2,40}$/.test(line) &&
+        /^\d+\s*(초|분|시간|일|주)$/.test(lines[index + 1] ?? '')
+      )
+        continue;
 
       cleanedLines.push(line);
     }

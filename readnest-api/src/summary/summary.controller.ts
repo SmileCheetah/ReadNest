@@ -1,4 +1,11 @@
-import { Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthUser } from '../auth/types/auth-user';
@@ -10,16 +17,21 @@ export class SummaryController {
   constructor(private readonly summaryService: SummaryService) {}
 
   @Post()
-  retry(@CurrentUser() user: AuthUser, @Param('articleId') articleId: string) {
-    return this.summaryService.retryArticleSummary(user.id, articleId);
+  retry(
+    @CurrentUser() user: AuthUser,
+    @Param('articleId') articleId: string,
+    @Headers('idempotency-key') key?: string,
+  ) {
+    return this.summaryService.retryArticleSummary(user.id, articleId, key);
   }
 
   @Post('retry')
   retryAlias(
     @CurrentUser() user: AuthUser,
     @Param('articleId') articleId: string,
+    @Headers('idempotency-key') key?: string,
   ) {
-    return this.summaryService.retryArticleSummary(user.id, articleId);
+    return this.summaryService.retryArticleSummary(user.id, articleId, key);
   }
 
   @Get('status')

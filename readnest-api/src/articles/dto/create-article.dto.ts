@@ -3,12 +3,12 @@ import { IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
 export class CreateArticleDto {
   @IsUrl({
     require_protocol: true,
-    protocols: ['http', 'https'],
+    protocols: ['https'],
   })
   url: string;
 
   @IsOptional()
   @IsString()
-  @MaxLength(200)
+  @MaxLength(191)
   title?: string;
 }

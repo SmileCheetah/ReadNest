@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, ProcessStatus, ReadStatus } from '@prisma/client';
@@ -9,7 +10,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SummaryService } from '../summary/summary.service';
 import { CreateArticleDto } from './dto/create-article.dto';
 import { ListArticlesQueryDto } from './dto/list-articles-query.dto';
-import { normalizeUrl } from './utils/normalize-url';
+import { parseThreadsUrl } from './utils/normalize-url';
+import { summaryPreview, withArticleStatus } from './utils/summary-preview';
+import {
+  articleListSelect,
+  cursorScope,
+  decodeCursor,
+  encodeCursor,
+  productCalendar,
+} from './utils/article-list';
 
 @Injectable()
 export class ArticlesService {
@@ -20,70 +29,81 @@ export class ArticlesService {
   ) {}
 
   async create(userId: string, dto: CreateArticleDto) {
-    const normalizedUrl = normalizeUrl(dto.url);
-    await this.ensureDailySaveLimit(userId);
-
-    try {
-      const article = await this.prisma.savedArticle.create({
+    const link = parseThreadsUrl(dto.url);
+    if (dto.title && Array.from(dto.title).length > 191)
+      throw new BadRequestException('제목은 191자 이하로 입력해 주세요.');
+    const article = await this.prisma.$transaction(async (tx) => {
+      const users = await tx.$queryRaw<
+        Array<{ id: string }>
+      >`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`;
+      if (!users.length)
+        throw new UnauthorizedException('로그인이 필요합니다.');
+      const existing = await this.findExisting(tx, userId, dto.url);
+      if (existing) return existing;
+      await this.ensureDailySaveLimit(userId, tx);
+      const saved = await tx.savedArticle.create({
         data: {
           userId,
-          url: dto.url,
-          normalizedUrl,
+          url: link.canonical,
+          normalizedUrl: link.identity,
           title: dto.title,
+          author: link.author,
+          generation: 1,
+          stage: 'QUEUED',
           processStatus: ProcessStatus.SUMMARIZING,
           readStatus: ReadStatus.UNREAD,
         },
       });
-
-      await this.summaryService.enqueueArticleSummary(article.id);
-
-      return article;
-    } catch (error) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
-      ) {
-        const updated = await this.prisma.savedArticle.update({
-          where: {
-            userId_normalizedUrl: {
-              userId,
-              normalizedUrl,
-            },
-          },
-          data: {
-            title: dto.title,
-            rawText: null,
-            summary: null,
-            keyPoints: Prisma.JsonNull,
-            tags: Prisma.JsonNull,
-            processStatus: ProcessStatus.SUMMARIZING,
-            lastSummaryError: null,
-          },
-        });
-
-        await this.summaryService.enqueueArticleSummary(updated.id);
-
-        return updated;
-      }
-
-      throw error;
-    }
+      await tx.summaryTask.create({
+        data: { articleId: saved.id, generation: 1 },
+      });
+      return saved;
+    });
+    this.summaryService.enqueueArticleSummary(article.id);
+    return withArticleStatus(article);
   }
 
-  private async ensureDailySaveLimit(userId: string) {
+  private async findExisting(
+    client: Prisma.TransactionClient,
+    userId: string,
+    input: string,
+  ) {
+    const link = parseThreadsUrl(input);
+    const canonical = await client.savedArticle.findUnique({
+      where: { userId_normalizedUrl: { userId, normalizedUrl: link.identity } },
+    });
+    if (canonical) return canonical;
+    // Read-only compatibility with old URL keys; never merge/delete historical rows.
+    const legacy = await client.savedArticle.findMany({
+      where: {
+        userId,
+        normalizedUrl: { contains: `/post/${link.postId}` },
+      },
+      orderBy: [{ savedAt: 'asc' }, { id: 'asc' }],
+    });
+    return (
+      legacy.find((article) => {
+        try {
+          return parseThreadsUrl(article.url).postId === link.postId;
+        } catch {
+          return false;
+        }
+      }) ?? null
+    );
+  }
+
+  private async ensureDailySaveLimit(
+    userId: string,
+    client: Prisma.TransactionClient,
+  ) {
     const limit = Number(
       this.configService.get<string>('DAILY_SAVE_LIMIT') ?? 50,
     );
 
     if (limit <= 0) return;
 
-    const now = new Date();
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
-    const savedToday = await this.prisma.savedArticle.count({
+    const startOfToday = productCalendar().today;
+    const savedToday = await client.savedArticle.count({
       where: {
         userId,
         savedAt: {
@@ -133,24 +153,86 @@ export class ArticlesService {
       ];
     }
 
-    return this.prisma.savedArticle.findMany({
+    if (query.pagination === 'cursor') {
+      const scope = cursorScope(userId, {
+        period: query.period ?? 'all',
+        processStatus: query.processStatus ?? null,
+        readStatus: query.readStatus ?? null,
+        search: query.search ?? '',
+      });
+      const secret = this.configService.getOrThrow<string>('JWT_SECRET');
+      const cursor = query.cursor
+        ? decodeCursor(query.cursor, scope, secret)
+        : null;
+      const limit = query.limit ?? 30;
+      const items = await this.prisma.savedArticle.findMany({
+        where: {
+          AND: [
+            where,
+            ...(cursor
+              ? [
+                  {
+                    OR: [
+                      { savedAt: { lt: cursor.savedAt } },
+                      { savedAt: cursor.savedAt, id: { lt: cursor.id } },
+                    ],
+                  },
+                ]
+              : []),
+          ],
+        },
+        orderBy: [{ savedAt: 'desc' }, { id: 'desc' }],
+        take: limit + 1,
+        select: articleListSelect,
+      });
+      const visible = items.slice(0, limit);
+      // Historical rows have no persisted preview. Fetch only this page's missing
+      // documents in one owner-scoped batch, without leaking them into list output.
+      const missingPreviewIds = visible
+        .filter((item) => item.summaryPreview === null)
+        .map((item) => item.id);
+      const legacyDocuments = missingPreviewIds.length
+        ? await this.prisma.savedArticle.findMany({
+            where: { userId, id: { in: missingPreviewIds } },
+            select: { id: true, summaryMeta: true, summary: true },
+          })
+        : [];
+      const previews = new Map(
+        legacyDocuments.map((item) => {
+          const meta = item.summaryMeta as { summaryMarkdown?: unknown } | null;
+          return [
+            item.id,
+            summaryPreview(meta?.summaryMarkdown ?? item.summary),
+          ] as const;
+        }),
+      );
+      return {
+        items: visible.map((item) =>
+          withArticleStatus({
+            ...item,
+            summaryPreview:
+              item.summaryPreview ?? previews.get(item.id) ?? null,
+          }),
+        ),
+        nextCursor:
+          items.length > limit
+            ? encodeCursor(visible[visible.length - 1], scope, secret)
+            : null,
+      };
+    }
+    const articles = await this.prisma.savedArticle.findMany({
       where,
       orderBy: {
         savedAt: 'desc',
       },
       take: query.limit ?? 50,
     });
+    // Legacy array response is preserved for older clients.
+    return articles.map(withArticleStatus);
   }
 
   async getHome(userId: string) {
-    const now = new Date();
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
-    const startOfWeek = new Date(startOfToday);
-    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+    const { today: startOfToday, week: startOfWeek } = productCalendar();
 
     const [readingCandidates, summarizing, today, unreadCount, weekSavedCount] =
       await Promise.all([
@@ -217,9 +299,10 @@ export class ArticlesService {
           (a, b) =>
             readStatusPriority[a.readStatus] - readStatusPriority[b.readStatus],
         )
-        .slice(0, 3),
-      summarizing,
-      today,
+        .slice(0, 3)
+        .map(withArticleStatus),
+      summarizing: summarizing.map(withArticleStatus),
+      today: today.map(withArticleStatus),
       unreadCount,
       weekSavedCount,
     };
@@ -244,30 +327,22 @@ export class ArticlesService {
       throw new NotFoundException('저장글을 찾을 수 없습니다.');
     }
 
-    return article;
+    return withArticleStatus(article);
   }
 
   async checkDuplicate(userId: string, url: string) {
-    const normalizedUrl = normalizeUrl(url);
-    const article = await this.prisma.savedArticle.findUnique({
-      where: {
-        userId_normalizedUrl: {
-          userId,
-          normalizedUrl,
-        },
-      },
-    });
+    const article = await this.findExisting(this.prisma, userId, url);
 
     return {
       duplicated: Boolean(article),
-      article,
+      article: article ? withArticleStatus(article) : null,
     };
   }
 
   async updateReadStatus(userId: string, id: string, readStatus: ReadStatus) {
     await this.ensureOwnedArticle(userId, id);
 
-    return this.prisma.savedArticle.update({
+    const article = await this.prisma.savedArticle.update({
       where: {
         id,
       },
@@ -275,6 +350,7 @@ export class ArticlesService {
         readStatus,
       },
     });
+    return withArticleStatus(article);
   }
 
   async remove(userId: string, id: string) {
@@ -311,12 +387,7 @@ export class ArticlesService {
   private getPeriodWhere(
     period: ListArticlesQueryDto['period'] = 'all',
   ): Prisma.SavedArticleWhereInput {
-    const now = new Date();
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
+    const { today: startOfToday, week, month } = productCalendar();
 
     if (period === 'today') {
       return {
@@ -327,8 +398,7 @@ export class ArticlesService {
     }
 
     if (period === 'week') {
-      const start = new Date(startOfToday);
-      start.setDate(start.getDate() - start.getDay());
+      const start = week;
 
       return {
         savedAt: {
@@ -338,11 +408,8 @@ export class ArticlesService {
     }
 
     if (period === 'last-week') {
-      const end = new Date(startOfToday);
-      end.setDate(end.getDate() - end.getDay());
-
-      const start = new Date(end);
-      start.setDate(start.getDate() - 7);
+      const end = week;
+      const start = new Date(end.getTime() - 7 * 86400_000);
 
       return {
         savedAt: {
@@ -355,7 +422,7 @@ export class ArticlesService {
     if (period === 'month') {
       return {
         savedAt: {
-          gte: new Date(now.getFullYear(), now.getMonth(), 1),
+          gte: month,
         },
       };
     }
