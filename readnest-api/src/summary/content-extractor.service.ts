@@ -4,6 +4,11 @@ import { chromium } from 'playwright';
 import { parseThreadsUrl } from '../articles/utils/normalize-url';
 import { safeSourceRequest, type SourceBudget } from './safe-source-http';
 import { positiveInteger } from '../articles/utils/summary-preview';
+import {
+  decodeSourceHtml,
+  extractThreadsSource,
+  sourceFailureCode,
+} from './threads-source';
 
 export type ExtractedContent = {
   title?: string;
@@ -20,78 +25,11 @@ export class ContentExtractorService {
   constructor(private readonly configService: ConfigService) {}
 
   async extract(url: string): Promise<ExtractedContent> {
+    const deadline = Date.now() + 45000;
+    let fallback: ExtractedContent | null = null;
     try {
       url = parseThreadsUrl(url).canonical;
-      const budget: SourceBudget = {
-        remainingBytes: 8 * 1024 * 1024,
-        deadline: Date.now() + 45000,
-      };
-      if (this.isThreadsUrl(url)) {
-        const renderedContent = await this.extractThreadsWithBrowser(
-          url,
-          budget,
-        );
-
-        if (renderedContent.text.length > 200) {
-          return renderedContent;
-        }
-
-        this.logger.warn(
-          `Threads browser extraction returned only ${renderedContent.text.length} characters. Using HTTP fallback.`,
-        );
-      }
-
-      const response = await safeSourceRequest(url, { budget });
-
-      if (response.status < 200 || response.status >= 300) {
-        throw new Error(`Fetch failed with status ${response.status}`);
-      }
-
-      const html = response.body.toString('utf8');
-      const title =
-        this.extractMeta(html, 'og:title') ??
-        this.extractTagContent(html, 'title') ??
-        undefined;
-      const description =
-        this.extractMeta(html, 'og:description') ??
-        this.extractMeta(html, 'description') ??
-        '';
-      // Fallback metadata is safer than treating every comment/navigation label as source.
-      const text = this.cleanThreadsText(description).slice(0, 12000);
-      const isAccessScreen =
-        /^(?:log in|login|sign up|join threads|로그인|가입하기|페이지를 찾을 수 없|요청한 페이지|sorry[,!]?|content (?:isn't|is not) available)/i.test(
-          text,
-        );
-      // Length is not evidence: a legitimate short post remains usable when its
-      // metadata identifies the requested post. Never treat a login/error page as it.
-      const metadataUrl =
-        this.extractMeta(html, 'og:url') ?? this.extractCanonicalUrl(html);
-      let samePost = false;
-      if (metadataUrl) {
-        try {
-          samePost =
-            parseThreadsUrl(metadataUrl).identity ===
-            parseThreadsUrl(url).identity;
-        } catch {
-          /* Non-post metadata is not source evidence. */
-        }
-      }
-      const usable = Boolean(
-        text &&
-        !isAccessScreen &&
-        (samePost || (!metadataUrl && text.length > 80)),
-      );
-
-      return {
-        title,
-        text,
-        extractionStatus: usable ? 'FALLBACK_SUCCESS' : 'FAILED',
-        extractionConfidence: usable ? 0.55 : 0.15,
-        sourceCompleteness: usable ? 'PARTIAL' : 'UNKNOWN',
-      };
     } catch {
-      this.logger.warn('Content extraction failed; no source returned.');
-
       return {
         text: '',
         extractionStatus: 'FAILED',
@@ -99,6 +37,113 @@ export class ContentExtractorService {
         sourceCompleteness: 'UNKNOWN',
       };
     }
+    try {
+      // Reserve source HTML first: optional JS/CDN traffic must not consume it.
+      const response = await safeSourceRequest(url, {
+        budget: {
+          remainingBytes: 2 * 1024 * 1024,
+          deadline: Date.now() + 10000,
+        },
+      });
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`SOURCE_HTTP_${response.status}`);
+      }
+      const html = response.body.toString('utf8');
+      const structured = this.fromStructuredHtml(html, url);
+      if (structured) return structured;
+      fallback = this.fromMetadata(html, url);
+    } catch (error) {
+      this.logger.warn(`Threads HTTP extraction: ${sourceFailureCode(error)}`);
+    }
+
+    // Browser is a bounded secondary source, never generic body text.
+    if (Date.now() < deadline) {
+      const rendered = await this.extractThreadsWithBrowser(url, {
+        remainingBytes: 6 * 1024 * 1024,
+        deadline,
+      });
+      if (rendered.extractionStatus !== 'FAILED' && rendered.text)
+        return rendered;
+    }
+    if (fallback) {
+      this.logger.warn(
+        `Threads metadata-only source: chars=${fallback.text.length} completeness=PARTIAL`,
+      );
+      return fallback;
+    }
+    return {
+      text: '',
+      extractionStatus: 'FAILED',
+      extractionConfidence: 0,
+      sourceCompleteness: 'UNKNOWN',
+    };
+  }
+
+  private textLimit() {
+    return Math.min(
+      50000,
+      positiveInteger(
+        this.configService.get<string>('EXTRACT_TEXT_LIMIT'),
+        50000,
+      ),
+    );
+  }
+
+  private fromStructuredHtml(
+    html: string,
+    url: string,
+  ): ExtractedContent | null {
+    const source = extractThreadsSource(html, url, this.textLimit());
+    if (!source) return null;
+    this.logger.log(
+      `Threads structured source: parts=${source.partCount} chars=${source.text.length} completeness=${source.sourceCompleteness}`,
+    );
+    return {
+      ...source,
+      extractionStatus: 'SUCCESS',
+      extractionConfidence: 0.9,
+    };
+  }
+
+  private fromMetadata(html: string, url: string): ExtractedContent | null {
+    const title =
+      this.extractMeta(html, 'og:title') ??
+      this.extractTagContent(html, 'title') ??
+      undefined;
+    const description =
+      this.extractMeta(html, 'og:description') ??
+      this.extractMeta(html, 'description') ??
+      '';
+    // Fallback metadata is safer than treating every comment/navigation label as source.
+    const text = this.cleanThreadsText(description).slice(0, this.textLimit());
+    const isAccessScreen =
+      /^(?:log in|login|sign up|join threads|로그인|가입하기|페이지를 찾을 수 없|요청한 페이지|sorry[,!]?|content (?:isn't|is not) available)/i.test(
+        text,
+      );
+    // Length is not evidence: a legitimate short post remains usable when its
+    // metadata identifies the requested post. Never treat a login/error page as it.
+    const metadataUrl =
+      this.extractMeta(html, 'og:url') ?? this.extractCanonicalUrl(html);
+    let samePost = false;
+    if (metadataUrl) {
+      try {
+        samePost =
+          parseThreadsUrl(metadataUrl).identity ===
+          parseThreadsUrl(url).identity;
+      } catch {
+        /* Non-post metadata is not source evidence. */
+      }
+    }
+    const usable = Boolean(text && !isAccessScreen && samePost);
+    return usable
+      ? {
+          title,
+          text,
+          extractionStatus: 'FALLBACK_SUCCESS',
+          extractionConfidence: 0.55,
+          sourceCompleteness: 'PARTIAL',
+        }
+      : null;
   }
 
   private async extractThreadsWithBrowser(
@@ -106,6 +151,7 @@ export class ContentExtractorService {
     budget: SourceBudget,
   ): Promise<ExtractedContent> {
     let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
+    const resourceFailures = new Map<string, number>();
 
     try {
       browser = await this.launchBrowser(budget.deadline);
@@ -142,7 +188,10 @@ export class ContentExtractorService {
             headers: response.headers,
             body: response.body,
           });
-        } catch {
+        } catch (error) {
+          // Deduplicate resource failures below instead of dumping signed URLs.
+          const code = sourceFailureCode(error);
+          resourceFailures.set(code, (resourceFailures.get(code) ?? 0) + 1);
           await route.abort().catch(() => undefined);
         }
       });
@@ -173,40 +222,18 @@ export class ContentExtractorService {
         await page.waitForTimeout(700);
       }
 
-      const title = await page.title().catch(() => undefined);
-      const bodyText = await page
-        .locator('body')
-        .innerText({
-          timeout: Math.max(1, Math.min(5000, budget.deadline - Date.now())),
-        })
-        .catch(() => '');
-      const cleanedText = this.cleanThreadsText(bodyText).slice(
-        0,
-        Math.min(
-          50000,
-          positiveInteger(
-            this.configService.get<string>('EXTRACT_TEXT_LIMIT'),
-            50000,
-          ),
-        ),
+      const html = await page.content();
+      return (
+        this.fromStructuredHtml(html, url) ??
+        this.fromMetadata(html, url) ?? {
+          text: '',
+          extractionStatus: 'FAILED',
+          extractionConfidence: 0,
+        }
       );
-      const hasUsefulText = cleanedText.length > 200;
-
-      return {
-        title: title ? this.cleanThreadsTitle(title) : undefined,
-        text: cleanedText,
-        extractionStatus: hasUsefulText ? 'SUCCESS' : 'FAILED',
-        extractionConfidence: hasUsefulText ? 0.9 : 0.2,
-        // body text alone cannot prove same-author/root ownership or complete collection.
-        sourceCompleteness: /로그인하여 더 많은 답글|로그인 또는 가입/.test(
-          bodyText,
-        )
-          ? 'PARTIAL'
-          : 'UNKNOWN',
-      };
-    } catch {
+    } catch (error) {
       this.logger.warn(
-        'Threads browser extraction failed; using bounded fallback if budget remains.',
+        `Threads browser extraction: ${sourceFailureCode(error)}`,
       );
 
       return {
@@ -216,6 +243,10 @@ export class ContentExtractorService {
       };
     } finally {
       await browser?.close().catch(() => undefined);
+      if (resourceFailures.size)
+        this.logger.warn(
+          `Threads resource failures: ${JSON.stringify(Object.fromEntries(resourceFailures))}`,
+        );
     }
   }
 
@@ -244,27 +275,18 @@ export class ContentExtractorService {
   }
 
   private extractMeta(html: string, name: string) {
-    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const patterns = [
-      new RegExp(
-        `<meta[^>]+property=["']${escapedName}["'][^>]+content=["']([^"']+)["'][^>]*>`,
-        'i',
-      ),
-      new RegExp(
-        `<meta[^>]+name=["']${escapedName}["'][^>]+content=["']([^"']+)["'][^>]*>`,
-        'i',
-      ),
-      new RegExp(
-        `<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${escapedName}["'][^>]*>`,
-        'i',
-      ),
-    ];
-
-    for (const pattern of patterns) {
-      const match = html.match(pattern);
-      if (match?.[1]) {
-        return this.decodeHtml(match[1]).trim();
+    for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
+      const attributes: Record<string, string> = {};
+      for (const match of tag.matchAll(
+        /\b(property|name|content)\s*=\s*(["'])([\s\S]*?)\2/gi,
+      )) {
+        attributes[match[1].toLowerCase()] = match[3];
       }
+      if (
+        (attributes.property ?? attributes.name)?.toLowerCase() ===
+        name.toLowerCase()
+      )
+        return this.decodeHtml(attributes.content ?? '').trim();
     }
 
     return null;
@@ -285,38 +307,6 @@ export class ContentExtractorService {
       if (href) return this.decodeHtml(href);
     }
     return null;
-  }
-
-  private extractBodyText(html: string) {
-    const withoutScripts = html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ');
-
-    return this.decodeHtml(withoutScripts.replace(/<[^>]+>/g, ' '))
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  private isThreadsUrl(url: string) {
-    try {
-      const parsedUrl = new URL(url);
-      return [
-        'threads.com',
-        'www.threads.com',
-        'threads.net',
-        'www.threads.net',
-      ].includes(parsedUrl.hostname);
-    } catch {
-      return false;
-    }
-  }
-
-  private cleanThreadsTitle(title: string) {
-    return title
-      .replace(/\s+on\s+Threads.*$/i, '')
-      .replace(/\s+\|\s+Threads.*$/i, '')
-      .trim();
   }
 
   private cleanThreadsText(text: string) {
@@ -377,12 +367,6 @@ export class ContentExtractorService {
   }
 
   private decodeHtml(value: string) {
-    return value
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&nbsp;/g, ' ');
+    return decodeSourceHtml(value);
   }
 }

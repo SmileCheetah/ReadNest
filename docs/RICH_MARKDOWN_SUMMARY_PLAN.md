@@ -70,5 +70,5 @@ AI 응답에서 별도 구조화 JSON이나 내부 요약 문서를 요구하지
 - 첫 H1 대신 실제 문단을 preview로 사용한다. 과거 저장 데이터에 preview가 없으면 서버가 해당 목록 페이지의 기존 Markdown을 한 번에 조회해 계산한다. 상세에서도 같은 규칙으로 추출하며 과거 데이터를 임의로 재요약하지 않는다.
 - Frontend/Backend는 공통 허용 fixture를 검사한다. 문장 속 `A | B | C`는 허용하고 표/HTML/이미지/Markdown 링크/코드 펜스는 거부한다.
 - 긴 문서의 연속 prefix, 번호·soft/hard break, 상태·복사·읽음 회귀 테스트를 추가했다.
-- 현재 extractor는 작성자/루트·전체 parts를 입증하지 못한다. `UNKNOWN` 또는 확인된 제한에 따른 `PARTIAL`만 반환하며 거짓 완결/정확도를 화면에 표시하지 않는다.
+- extractor는 공개 JSON에서 요청한 post ID/작성자와 같은 media ID의 self-thread를 확인해 원문을 결합한다. 전체 공개/비공개 parts까지 입증하지는 않으므로 `UNKNOWN` 또는 확인된 제한에 따른 `PARTIAL`만 반환한다. 글자 수로 본문 여부를 판단하지 않는다. [수집 회귀 수정 기록](THREADS_EXTRACTION_REGRESSION_20260929.md)을 따른다.
 - 실제 모델 품질, 완전한 연속 글 수집, native 200%/스크린리더 검증은 자동 테스트와 별개다. 최신 실측과 남은 위험은 [구현 기록](PRODUCT_UX_IMPLEMENTATION_REPORT.md)에 분리한다.

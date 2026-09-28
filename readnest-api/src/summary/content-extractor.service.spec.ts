@@ -4,6 +4,7 @@ import { safeSourceRequest } from './safe-source-http';
 jest.mock('./safe-source-http', () => ({ safeSourceRequest: jest.fn() }));
 
 describe('ContentExtractorService', () => {
+  beforeEach(() => jest.clearAllMocks());
   const service = new ContentExtractorService(new ConfigService());
   const cleanThreadsText = (text: string) =>
     (
@@ -110,5 +111,83 @@ wakeupmoon.ai
       (await extractor.extract('https://www.threads.com/@author/post/AbC'))
         .extractionStatus,
     ).toBe('FAILED');
+  });
+
+  it('reads identified source before optional browser resources and keeps continuation text', async () => {
+    const extractor = new ContentExtractorService(new ConfigService());
+    const browser = jest.spyOn(
+      extractor as unknown as {
+        extractThreadsWithBrowser: () => Promise<unknown>;
+      },
+      'extractThreadsWithBrowser',
+    );
+    const root = {
+      pk: '1',
+      code: 'AbC',
+      user: { username: 'author' },
+      caption: { text: '짧은 정상 글' },
+    };
+    const fragment = {
+      id: '1_2',
+      text_post_app_info: {
+        self_thread: {
+          posts: {
+            edges: [
+              {
+                node: {
+                  code: 'Next',
+                  user: { username: 'author' },
+                  caption: { text: '독립적인 다음 주장' },
+                },
+              },
+            ],
+            page_info: { has_next_page: false },
+          },
+        },
+      },
+    };
+    const html = [root, fragment]
+      .map(
+        (media) =>
+          `<script type="application/json">${JSON.stringify({ result: { data: { media } } })}</script>`,
+      )
+      .join('');
+    jest
+      .mocked(safeSourceRequest)
+      .mockResolvedValue({ status: 200, headers: {}, body: Buffer.from(html) });
+    const result = await extractor.extract(
+      'https://www.threads.com/@author/post/AbC',
+    );
+    expect(result.text).toBe('짧은 정상 글\n\n독립적인 다음 주장');
+    expect(result.extractionStatus).toBe('SUCCESS');
+    expect(browser).not.toHaveBeenCalled();
+  });
+
+  it('retains verified metadata even when browser exhausts its separate resource budget', async () => {
+    const extractor = new ContentExtractorService(new ConfigService());
+    jest
+      .spyOn(
+        extractor as unknown as {
+          extractThreadsWithBrowser: () => Promise<unknown>;
+        },
+        'extractThreadsWithBrowser',
+      )
+      .mockResolvedValue({ text: '', extractionStatus: 'FAILED' });
+    jest.mocked(safeSourceRequest).mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: Buffer.from(
+        '<meta property="og:url" content="https://www.threads.com/&#064;author/post/AbC"><meta property="og:description" content="&#xD55C;&#44544; 짧은 글">',
+      ),
+    });
+    const result = await extractor.extract(
+      'https://www.threads.com/@author/post/AbC',
+    );
+    expect(result).toMatchObject({
+      text: '한글 짧은 글',
+      extractionStatus: 'FALLBACK_SUCCESS',
+      sourceCompleteness: 'PARTIAL',
+    });
+    expect(safeSourceRequest).toHaveBeenCalledTimes(1);
   });
 });
