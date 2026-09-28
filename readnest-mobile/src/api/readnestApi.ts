@@ -50,9 +50,24 @@ export type ApiArticle = {
   normalizedUrl: string;
   title: string | null;
   author: string | null;
-  rawText: string | null;
-  summary: string | null;
-  summaryMeta: ApiSummaryMeta | null;
+  rawText?: string | null;
+  summary?: string | null;
+  summaryMeta?: ApiSummaryMeta | null;
+  summaryPreview?: string | null;
+  generation?: number;
+  resultGeneration?: number | null;
+  generatedAt?: string | null;
+  stage?:
+    | "QUEUED"
+    | "EXTRACTING"
+    | "GENERATING"
+    | "PERSISTING"
+    | "DONE"
+    | "FAILED";
+  errorCode?: string | null;
+  retryable?: boolean;
+  retryAfterSeconds?: number;
+  sourceCompleteness?: "UNKNOWN" | "PARTIAL" | "COMPLETE";
   keyPoints: string[] | null;
   tags: string[] | null;
   extractionStatus: string | null;
@@ -92,7 +107,40 @@ type RequestOptions = {
   token?: string;
   method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
+  signal?: AbortSignal;
+  idempotencyKey?: string;
 };
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code?: string,
+    public readonly retryAfterSeconds?: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export type ArticlePage = { items: ApiArticle[]; nextCursor: string | null };
+export type ApiSummaryStatus = Pick<ApiArticle, "id" | "processStatus"> &
+  Partial<
+    Pick<
+      ApiArticle,
+      | "generation"
+      | "resultGeneration"
+      | "generatedAt"
+      | "stage"
+      | "errorCode"
+      | "retryable"
+      | "retryAfterSeconds"
+      | "lastSummaryError"
+      | "updatedAt"
+      | "sourceCompleteness"
+      | "summaryPreview"
+    >
+  >;
 
 export type ListArticlesOptions = {
   period?: "today" | "week" | "last-week" | "month" | "all";
@@ -105,36 +153,80 @@ export type ListArticlesOptions = {
     | "CONTEXT_INSUFFICIENT";
   search?: string;
   limit?: number;
+  signal?: AbortSignal;
 };
 
 async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: options.method ?? "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  options.signal?.addEventListener("abort", cancel, { once: true });
+  const timeout = setTimeout(cancel, 20000);
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: options.method ?? "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+        ...(options.idempotencyKey
+          ? { "Idempotency-Key": options.idempotencyKey }
+          : {}),
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal,
+    });
 
-  const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+    const text = await response.text();
+    let data: any = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      throw new ApiError(
+        "서버 응답을 확인하지 못했어요. 잠시 후 다시 불러와 주세요.",
+        response.status,
+      );
+    }
 
-  if (!response.ok) {
-    const message =
-      typeof data?.message === "string"
-        ? data.message
-        : Array.isArray(data?.message)
-          ? data.message.join("\n")
-          : "요청을 처리하지 못했습니다.";
+    if (!response.ok) {
+      const message =
+        typeof data?.message === "string"
+          ? data.message
+          : Array.isArray(data?.message)
+            ? data.message.join("\n")
+            : "요청을 처리하지 못했습니다.";
 
-    throw new Error(message);
+      const retryAfterSeconds = Number(
+        data?.retryAfterSeconds ?? response.headers.get("Retry-After"),
+      );
+      throw new ApiError(
+        message,
+        response.status,
+        data?.errorCode,
+        Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+          ? retryAfterSeconds
+          : undefined,
+      );
+    }
+
+    return data as T;
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", cancel);
   }
+}
 
-  return data as T;
+function articleParams(options: ListArticlesOptions) {
+  const params = new URLSearchParams({
+    period: options.period ?? "all",
+    limit: String(options.limit ?? 30),
+  });
+  if (options.readStatus) params.set("readStatus", options.readStatus);
+  if (options.processStatus) params.set("processStatus", options.processStatus);
+  if (options.search?.trim()) params.set("search", options.search.trim());
+  return params;
 }
 
 export const readnestApi = {
@@ -152,32 +244,32 @@ export const readnestApi = {
     });
   },
 
-  me(token: string) {
+  me(token: string, signal?: AbortSignal) {
     return request<ApiUser>("/auth/me", {
       token,
+      signal,
     });
   },
 
   listArticles(token: string, options: ListArticlesOptions = {}) {
-    const params = new URLSearchParams({
-      period: options.period ?? "all",
-      limit: String(options.limit ?? 50),
-    });
-
-    if (options.readStatus) {
-      params.set("readStatus", options.readStatus);
-    }
-
-    if (options.processStatus) {
-      params.set("processStatus", options.processStatus);
-    }
-
-    if (options.search?.trim()) {
-      params.set("search", options.search.trim());
-    }
+    const params = articleParams(options);
 
     return request<ApiArticle[]>(`/articles?${params.toString()}`, {
       token,
+      signal: options.signal,
+    });
+  },
+
+  listArticlePage(
+    token: string,
+    options: ListArticlesOptions & { cursor?: string } = {},
+  ) {
+    const params = articleParams(options);
+    params.set("pagination", "cursor");
+    if (options.cursor) params.set("cursor", options.cursor);
+    return request<ArticlePage>(`/articles?${params.toString()}`, {
+      token,
+      signal: options.signal,
     });
   },
 
@@ -195,9 +287,17 @@ export const readnestApi = {
     });
   },
 
-  getArticle(token: string, articleId: string) {
+  getArticle(token: string, articleId: string, signal?: AbortSignal) {
     return request<ApiArticle>(`/articles/${articleId}`, {
       token,
+      signal,
+    });
+  },
+
+  getSummaryStatus(token: string, articleId: string, signal?: AbortSignal) {
+    return request<ApiSummaryStatus>(`/articles/${articleId}/summary/status`, {
+      token,
+      signal,
     });
   },
 
@@ -216,10 +316,11 @@ export const readnestApi = {
     });
   },
 
-  retrySummary(token: string, articleId: string) {
+  retrySummary(token: string, articleId: string, idempotencyKey?: string) {
     return request<ApiArticle>(`/articles/${articleId}/summary/retry`, {
       token,
       method: "POST",
+      idempotencyKey,
     });
   },
 };

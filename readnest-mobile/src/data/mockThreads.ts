@@ -11,6 +11,19 @@ export type SavedThread = {
   title: string;
   rawText?: string | null;
   summary: string;
+  summaryPreview?: string | null;
+  detailLoaded?: boolean;
+  documentStale?: boolean;
+  updatedAt?: string;
+  savedAtIso?: string;
+  generation?: number;
+  resultGeneration?: number | null;
+  generatedAt?: string | null;
+  stage?: "QUEUED" | "EXTRACTING" | "GENERATING" | "PERSISTING" | "DONE" | "FAILED";
+  errorCode?: string | null;
+  retryable?: boolean;
+  retryAfterSeconds?: number;
+  sourceCompleteness?: "UNKNOWN" | "PARTIAL" | "COMPLETE";
   summaryMeta?: {
     summaryMarkdown?: string;
     summaryType: string;

@@ -1,17 +1,21 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { colors, radius, spacing } from '../theme/tokens';
-import type { ScreenName } from '../../App';
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { colors, radius, spacing } from "../theme/tokens";
+import type { ScreenName } from "../../App";
 
 type Props = {
   current: ScreenName;
   onChange: (screen: ScreenName) => void;
 };
 
-const items: Array<{ key: ScreenName; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
-  { key: 'home', label: '홈', icon: 'home-outline' },
-  { key: 'archive', label: '아카이브', icon: 'archive-outline' },
-  { key: 'settings', label: '설정', icon: 'settings-outline' }
+const items: Array<{
+  key: ScreenName;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}> = [
+  { key: "home", label: "홈", icon: "home-outline" },
+  { key: "archive", label: "보관함", icon: "archive-outline" },
+  { key: "settings", label: "설정", icon: "settings-outline" },
 ];
 
 export function BottomNav({ current, onChange }: Props) {
@@ -22,11 +26,20 @@ export function BottomNav({ current, onChange }: Props) {
         return (
           <Pressable
             key={item.key}
+            accessibilityRole="tab"
+            accessibilityLabel={item.label}
+            accessibilityState={{ selected: active }}
             onPress={() => onChange(item.key)}
             style={[styles.item, active && styles.activeItem]}
           >
-            <Ionicons name={item.icon} size={22} color={active ? colors.primary : colors.muted} />
-            <Text style={[styles.label, active && styles.activeLabel]}>{item.label}</Text>
+            <Ionicons
+              name={item.icon}
+              size={22}
+              color={active ? colors.primary : colors.muted}
+            />
+            <Text style={[styles.label, active && styles.activeLabel]}>
+              {item.label}
+            </Text>
           </Pressable>
         );
       })}
@@ -36,37 +49,34 @@ export function BottomNav({ current, onChange }: Props) {
 
 const styles = StyleSheet.create({
   wrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     minHeight: 72,
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.sm,
     backgroundColor: colors.paper,
     borderTopColor: colors.hairline,
     borderTopWidth: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-around'
+    flexDirection: "row",
+    justifyContent: "space-around",
   },
   item: {
-    minWidth: 82,
-    alignItems: 'center',
-    justifyContent: 'center',
+    flex: 1,
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: radius.lg,
     paddingVertical: spacing.sm,
-    gap: 3
+    gap: 3,
   },
   activeItem: {
-    backgroundColor: colors.blueSoft
+    backgroundColor: colors.blueSoft,
   },
   label: {
     color: colors.muted,
-    fontSize: 11,
-    fontWeight: '700'
+    fontSize: 12,
+    fontWeight: "700",
   },
   activeLabel: {
-    color: colors.primary
-  }
+    color: colors.primaryPressed,
+  },
 });

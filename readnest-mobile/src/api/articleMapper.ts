@@ -1,5 +1,6 @@
 import type { ApiArticle } from "./readnestApi";
 import type { SavedThread } from "../data/mockThreads";
+import { extractSummaryPreview } from "../components/summary/summaryMarkdown";
 
 function formatSavedTime(savedAt: string) {
   const date = new Date(savedAt);
@@ -28,18 +29,38 @@ function getSavedDateLabel(savedAt: string) {
 
   if (diffDays === 0) return "오늘";
   if (diffDays === 1) return "어제";
-  if (diffDays < 7) return "이번 주";
+  if (diffDays > 1 && diffDays < 7) return `${diffDays}일 전`;
   return `${date.getMonth() + 1}월 ${date.getDate()}일`;
 }
 
 export function mapArticleToThread(article: ApiArticle): SavedThread {
   return {
     id: article.id,
-    title: article.title ?? "제목을 가져오는 중",
+    title:
+      article.title?.trim() ||
+      (article.processStatus === "SAVED" ||
+      article.processStatus === "SUMMARIZING"
+        ? "제목을 가져오는 중"
+        : "저장한 글"),
     rawText: article.rawText,
-    summary:
-      article.summary ??
-      "아직 요약이 생성되지 않았습니다. 요약 큐 연결 후 자동으로 채워질 예정입니다.",
+    summary: article.summary ?? "",
+    summaryPreview:
+      article.summaryPreview ??
+      extractSummaryPreview(
+        article.summaryMeta?.summaryMarkdown ?? article.summary,
+      ),
+    detailLoaded: Object.prototype.hasOwnProperty.call(article, "summaryMeta"),
+    documentStale: false,
+    savedAtIso: article.savedAt,
+    updatedAt: article.updatedAt,
+    generation: article.generation,
+    resultGeneration: article.resultGeneration,
+    generatedAt: article.generatedAt,
+    stage: article.stage,
+    errorCode: article.errorCode,
+    retryable: article.retryable,
+    retryAfterSeconds: article.retryAfterSeconds,
+    sourceCompleteness: article.sourceCompleteness,
     summaryMeta: article.summaryMeta
       ? {
           summaryMarkdown: article.summaryMeta.summaryMarkdown,
@@ -54,11 +75,8 @@ export function mapArticleToThread(article: ApiArticle): SavedThread {
           confidence: article.summaryMeta.confidence,
         }
       : undefined,
-    keyPoints: article.keyPoints ?? [
-      "원문 저장 완료",
-      "AI 요약 기능 연결 예정",
-    ],
-    tags: article.tags ?? ["Threads"],
+    keyPoints: article.keyPoints ?? [],
+    tags: article.tags ?? [],
     extractionConfidence: article.extractionConfidence,
     summaryRetryCount: article.summaryRetryCount,
     lastSummaryError: article.lastSummaryError,

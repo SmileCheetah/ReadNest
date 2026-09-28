@@ -1,80 +1,230 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors, spacing } from "../../theme/tokens";
+import {
+  getCollapsedBlocks,
+  isHeadingBlock,
+  markdownToPlainText,
+  parseMarkdown,
+  splitDocumentOpening,
+  type MarkdownBlock,
+} from "./summaryMarkdown";
 
-type ListItem = { marker?: string; text: string };
-type Block = { type: "heading" | "paragraph" | "ul" | "ol" | "quote"; level?: number; text?: string; items?: ListItem[] };
-
-export function isSupportedMarkdown(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  const markdown = value.trim();
-  if (!markdown || markdown.length > 16000) return false;
-  if (/<\/?[a-z][^>]*>|```|\|.*\|/i.test(markdown)) return false;
-  if (/^#{4,}(?:\s|$)/m.test(markdown)) return false;
-  if (/\[[^\]]+\]\([^)]+\)/.test(markdown)) return false;
-  return true;
-}
+export { isSupportedMarkdown, parseMarkdown } from "./summaryMarkdown";
 
 function inline(text: string) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, index) => part.startsWith("**") && part.endsWith("**")
-    ? <Text key={index} style={styles.bold}>{part.slice(2, -2)}</Text>
-    : <Fragment key={index}>{part.replace(/<[^>]*>/g, "")}</Fragment>);
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
+    part.startsWith("**") && part.endsWith("**") ? (
+      <Text key={index} style={styles.bold}>
+        {part.slice(2, -2)}
+      </Text>
+    ) : (
+      <Fragment key={index}>{part}</Fragment>
+    ),
+  );
 }
 
-export function parseMarkdown(markdown: string): Block[] {
-  const blocks: Block[] = [];
-  let paragraph: string[] = [];
-  let list: { type: "ul" | "ol"; items: ListItem[] } | null = null;
-  let quote: string[] = [];
-  const flush = () => { if (paragraph.length) blocks.push({ type: "paragraph", text: paragraph.join("\n") }); paragraph = []; };
-  const flushList = () => { if (list) blocks.push({ type: list.type, items: list.items }); list = null; };
-  const flushQuote = () => { if (quote.length) blocks.push({ type: "quote", text: quote.join("\n") }); quote = []; };
-  for (const raw of markdown.replace(/\r\n?/g, "\n").split("\n")) {
-    const line = raw.trim();
-    if (!line) { flush(); flushList(); flushQuote(); continue; }
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) { flush(); flushList(); flushQuote(); blocks.push({ type: "heading", level: heading[1].length, text: heading[2] }); continue; }
-    const numberedHeading = line.match(/^(\d+)\.\s+(\*\*[^*]+\*\*)$/);
-    if (numberedHeading) { flush(); flushList(); flushQuote(); blocks.push({ type: "heading", level: 3, text: `${numberedHeading[1]}. ${numberedHeading[2]}` }); continue; }
-    const ordered = line.match(/^(\d+)[.)]\s+(.+)$/);
-    const unordered = line.match(/^[-*•]\s+(.+)$/);
-    if (ordered || unordered) { flush(); flushQuote(); const type = ordered ? "ol" : "ul"; if (!list || list.type !== type) { flushList(); list = { type, items: [] }; } list.items.push(ordered ? { marker: ordered[1], text: ordered[2] } : { text: unordered?.[1] ?? "" }); continue; }
-    if (line.startsWith(">")) { flush(); flushList(); quote.push(line.replace(/^>\s?/, "")); continue; }
-    flushList(); flushQuote(); paragraph.push(line);
-  }
-  flush(); flushList(); flushQuote();
-  return blocks;
+function RenderBlock({
+  block,
+  opening = false,
+}: {
+  block: MarkdownBlock;
+  opening?: boolean;
+}) {
+  if (block.type === "heading")
+    return (
+      <Text
+        selectable
+        accessibilityRole="header"
+        style={
+          block.level === 1
+            ? styles.h1
+            : block.level === 2
+              ? styles.h2
+              : styles.h3
+        }
+      >
+        {inline(block.text ?? "")}
+      </Text>
+    );
+  if (block.type === "quote")
+    return (
+      <View style={styles.quote}>
+        <Text selectable style={styles.quoteText}>
+          {inline(block.text ?? "")}
+        </Text>
+      </View>
+    );
+  if (block.type === "ul" || block.type === "ol")
+    return (
+      <View style={styles.list}>
+        {block.items?.map((item, index) => {
+          const marker =
+            block.type === "ol"
+              ? `${item.marker ?? ""}${item.delimiter ?? "."}`
+              : "•";
+          return (
+            <View key={index} style={styles.listItem}>
+              <Text
+                accessible={false}
+                importantForAccessibility="no"
+                style={styles.marker}
+              >
+                {marker}
+              </Text>
+              <Text
+                selectable
+                accessibilityLabel={`${marker} ${markdownToPlainText(item.text)}`}
+                style={[styles.body, styles.listBody]}
+              >
+                {inline(item.text)}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+    );
+  const itemHeading = isHeadingBlock(block);
+  return (
+    <Text
+      selectable
+      accessibilityRole={itemHeading ? "header" : undefined}
+      style={[
+        styles.body,
+        opening && styles.intro,
+        itemHeading && styles.itemHeading,
+      ]}
+    >
+      {inline(block.text ?? "")}
+    </Text>
+  );
 }
 
-export function MarkdownSummary({ markdown }: { markdown: string }) {
+export function MarkdownSummary({
+  markdown,
+  titleFallback,
+  afterIntro,
+}: {
+  markdown: string;
+  titleFallback?: string;
+  afterIntro?: ReactNode;
+}) {
   const blocks = useMemo(() => parseMarkdown(markdown), [markdown]);
+  const collapsed = useMemo(() => getCollapsedBlocks(blocks), [blocks]);
   const [expanded, setExpanded] = useState(false);
-  const isLong = markdown.length > 4000;
-  const visibleBlocks = isLong && !expanded ? blocks.reduce<Block[]>((result, block, index) => {
-    const currentLength = result.reduce((sum, item) => sum + (item.text?.length ?? item.items?.map((entry) => entry.text).join("").length ?? 0), 0);
-    const blockLength = block.text?.length ?? block.items?.map((entry) => entry.text).join("").length ?? 0;
-    return index === 0 || currentLength + blockLength <= 4000 ? [...result, block] : result;
-  }, []) : blocks;
-  return <View>{visibleBlocks.map((block, index) => {
-    if (block.type === "heading") return <Text key={index} accessibilityRole="header" style={block.level === 1 ? styles.h1 : block.level === 2 ? styles.h2 : styles.h3}>{inline(block.text ?? "")}</Text>;
-    if (block.type === "quote") return <View key={index} style={styles.quote}><Text style={styles.quoteText}>{inline(block.text ?? "")}</Text></View>;
-    if (block.type === "ul" || block.type === "ol") return <View key={index} accessible accessibilityLabel={block.type === "ol" ? "번호 목록" : "목록"} style={styles.list}>{block.items?.map((item, itemIndex) => <View key={itemIndex} accessible accessibilityLabel={block.type === "ol" ? `${item.marker ?? `${itemIndex + 1}`}. ${item.text}` : item.text} style={styles.listItem}><Text style={styles.marker}>{block.type === "ol" ? `${item.marker ?? `${itemIndex + 1}`}.` : "•"}</Text><Text style={styles.body}>{inline(item.text)}</Text></View>)}</View>;
-    return <Text key={index} style={styles.body}>{inline(block.text ?? "")}</Text>;
-  })}{isLong ? <Pressable accessibilityRole="button" accessibilityState={{ expanded }} accessibilityLabel={expanded ? "전체 요약 접기" : "전체 요약 펼치기"} style={styles.expandButton} onPress={() => setExpanded((value) => !value)}><Text style={styles.expandText}>{expanded ? "요약 접기" : "전체 요약 펼치기"}</Text></Pressable> : null}</View>;
+  useEffect(() => setExpanded(false), [markdown]);
+  const hasHiddenBlocks = collapsed.length < blocks.length;
+  const visible = expanded ? blocks : collapsed;
+  const opening = splitDocumentOpening(visible);
+  return (
+    <View>
+      {opening.title ? (
+        <RenderBlock block={opening.title} />
+      ) : titleFallback ? (
+        <Text selectable accessibilityRole="header" style={styles.h1}>
+          {titleFallback}
+        </Text>
+      ) : null}
+      {opening.intro ? <RenderBlock block={opening.intro} opening /> : null}
+      {afterIntro}
+      {opening.remainder.map((block, index) => (
+        <RenderBlock key={index} block={block} />
+      ))}
+      {hasHiddenBlocks ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          accessibilityLabel={expanded ? "전체 요약 접기" : "전체 요약 펼치기"}
+          style={styles.expandButton}
+          onPress={() => setExpanded((value) => !value)}
+        >
+          <Text style={styles.expandText}>
+            {expanded ? "요약 접기" : "전체 요약 펼치기"}
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-  h1: { color: colors.ink, fontSize: 28, lineHeight: 37, fontWeight: "800", letterSpacing: -0.7, marginBottom: spacing.lg },
-  h2: { color: colors.ink, fontSize: 22, lineHeight: 31, fontWeight: "700", marginTop: spacing.lg, marginBottom: spacing.sm },
-  h3: { color: colors.ink, fontSize: 20, lineHeight: 29, fontWeight: "700", marginTop: spacing.md, marginBottom: spacing.sm },
-  body: { color: colors.ink, fontSize: 16, lineHeight: 27, marginBottom: spacing.md, flexShrink: 1 },
+  h1: {
+    color: colors.ink,
+    fontSize: 26,
+    lineHeight: 34,
+    fontWeight: "700",
+    letterSpacing: -0.5,
+    marginBottom: spacing.md,
+    flexShrink: 1,
+  },
+  h2: {
+    color: colors.ink,
+    fontSize: 22,
+    lineHeight: 29,
+    fontWeight: "700",
+    marginTop: spacing.xl,
+    marginBottom: spacing.sm,
+    flexShrink: 1,
+  },
+  h3: {
+    color: colors.ink,
+    fontSize: 20,
+    lineHeight: 28,
+    fontWeight: "700",
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+    flexShrink: 1,
+  },
+  body: {
+    color: colors.ink,
+    fontSize: 16,
+    lineHeight: 27,
+    marginBottom: spacing.md,
+    flexShrink: 1,
+  },
+  intro: { color: colors.inkSoft },
+  itemHeading: {
+    fontSize: 17,
+    lineHeight: 27,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+    fontWeight: "700",
+  },
   bold: { fontWeight: "700" },
   list: { marginBottom: spacing.sm },
-  listItem: { flexDirection: "row", alignItems: "flex-start", marginBottom: spacing.sm },
-  marker: { color: colors.primary, width: 28, fontSize: 16, lineHeight: 27, fontWeight: "700" },
-  quote: { borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: spacing.md, marginVertical: spacing.sm },
-  quoteText: { color: colors.inkSoft, fontSize: 16, lineHeight: 26, fontStyle: "italic" },
-  expandButton: { minHeight: 44, justifyContent: "center", alignItems: "center", marginTop: spacing.sm },
+  listItem: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  marker: {
+    color: colors.inkSoft,
+    flexShrink: 0,
+    fontSize: 16,
+    lineHeight: 27,
+    fontWeight: "600",
+  },
+  listBody: { flex: 1, minWidth: 0, marginBottom: 0 },
+  quote: {
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
+    paddingLeft: spacing.md,
+    marginVertical: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  quoteText: {
+    color: colors.inkSoft,
+    fontSize: 16,
+    lineHeight: 27,
+    flexShrink: 1,
+  },
+  expandButton: {
+    minHeight: 44,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
   expandText: { color: colors.primary, fontSize: 15, fontWeight: "700" },
 });

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Alert,
+  FlatList,
   Image,
   KeyboardAvoidingView,
-  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -16,11 +16,12 @@ import {
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
-import * as SecureStore from "expo-secure-store";
 import * as ExpoLinking from "expo-linking";
 import { Ionicons } from "@expo/vector-icons";
-import { API_BASE_URL, ApiUser, readnestApi } from "./src/api/readnestApi";
-import { mapArticleToThread } from "./src/api/articleMapper";
+import { ApiError, ApiUser, readnestApi } from "./src/api/readnestApi";
+import { tokenStorage } from "./src/api/tokenStorage";
+import { useArticleLibrary } from "./src/hooks/useArticleLibrary";
+import { isProcessing } from "./src/hooks/articleState";
 import { AppHeader } from "./src/components/AppHeader";
 import { BottomNav } from "./src/components/BottomNav";
 import { ThreadCard } from "./src/components/ThreadCard";
@@ -32,8 +33,7 @@ export type ScreenName = "home" | "archive" | "settings";
 type ArchiveReadFilter = "ALL" | "UNREAD" | "READ" | "READ_LATER";
 type ArchivePeriod = "today" | "week" | "last-week" | "month" | "all";
 
-const archiveTabs = ["오늘", "이번 주", "지난주", "이번 달", "월별 아카이브"];
-const TOKEN_STORAGE_KEY = "readnest.accessToken";
+const archiveTabs = ["전체 기간", "오늘", "이번 주", "지난주", "이번 달"];
 
 function mapArchiveTabToPeriod(tab: string): ArchivePeriod {
   const periodByTab: Record<string, ArchivePeriod> = {
@@ -41,7 +41,7 @@ function mapArchiveTabToPeriod(tab: string): ArchivePeriod {
     "이번 주": "week",
     지난주: "last-week",
     "이번 달": "month",
-    "월별 아카이브": "all",
+    "전체 기간": "all",
   };
 
   return periodByTab[tab] ?? "all";
@@ -51,509 +51,238 @@ export default function App() {
   const [screen, setScreen] = useState<ScreenName>("home");
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [user, setUser] = useState<ApiUser | null>(null);
-  const [threads, setThreads] = useState<SavedThread[]>([]);
-  const [archiveThreads, setArchiveThreads] = useState<SavedThread[]>([]);
-  const [selectedThread, setSelectedThread] = useState<SavedThread | null>(
-    null,
-  );
-  const [activeArchiveTab, setActiveArchiveTab] = useState("오늘");
+  const [activeArchiveTab, setActiveArchiveTab] = useState("전체 기간");
   const [archiveSearch, setArchiveSearch] = useState("");
   const [archiveReadFilter, setArchiveReadFilter] =
     useState<ArchiveReadFilter>("ALL");
   const [url, setUrl] = useState("");
   const [pendingSharedUrl, setPendingSharedUrl] = useState<string | null>(null);
-  const [isLoadingArticles, setIsLoadingArticles] = useState(false);
-  const [isLoadingArchive, setIsLoadingArchive] = useState(false);
   const [isRestoringSession, setIsRestoringSession] = useState(true);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [isSavingArticle, setIsSavingArticle] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const readStatusVersions = useRef(new Map<string, number>());
-  const autoReadInFlight = useRef(new Set<string>());
-
-  const todayThreads = useMemo(
-    () => threads.filter((thread) => thread.savedDateLabel === "오늘"),
-    [threads],
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const saveInFlight = useRef(false);
+  const authGeneration = useRef(0);
+  const library = useArticleLibrary(
+    accessToken,
+    {
+      period: mapArchiveTabToPeriod(activeArchiveTab),
+      readStatus: archiveReadFilter === "ALL" ? undefined : archiveReadFilter,
+      search: archiveSearch,
+    },
+    screen === "archive",
   );
-  const summarizingThreads = useMemo(
-    () => threads.filter((thread) => thread.processStatus === "SUMMARIZING"),
-    [threads],
-  );
-  const unreadThreads = useMemo(
-    () => threads.filter((thread) => thread.readStatus === "UNREAD"),
-    [threads],
-  );
-  const todayReadingThreads = useMemo(() => {
-    const priority = {
-      READ_LATER: 0,
-      UNREAD: 1,
-      READ: 2,
-    } as const;
 
-    return threads
-      .filter(
-        (thread) =>
-          thread.processStatus === "SUMMARY_DONE" &&
-          (thread.readStatus === "UNREAD" ||
-            thread.readStatus === "READ_LATER"),
-      )
-      .sort((a, b) => priority[a.readStatus] - priority[b.readStatus])
-      .slice(0, 3);
-  }, [threads]);
-
-  const refreshArticles = useCallback(async () => {
-    if (!accessToken) return;
-
-    setIsLoadingArticles(true);
-    setErrorMessage(null);
-
+  const restoreSession = useCallback(async () => {
+    const generation = ++authGeneration.current;
+    setIsRestoringSession(true);
+    setSessionError(null);
     try {
-      const articles = await readnestApi.listArticles(accessToken);
-      setThreads(articles.map(mapArticleToThread));
+      const storedToken = await tokenStorage.get();
+      if (!storedToken) return;
+      const me = await readnestApi.me(storedToken);
+      if (generation !== authGeneration.current) return;
+      setAccessToken(storedToken);
+      setUser(me);
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "저장글을 불러오지 못했습니다.",
-      );
+      if (generation !== authGeneration.current) return;
+      if (
+        error instanceof ApiError &&
+        (error.status === 401 || error.status === 403)
+      ) {
+        await tokenStorage.clear();
+      } else
+        setSessionError(
+          "연결을 확인하지 못했어요. 로그인 정보는 안전하게 보관되어 있습니다.",
+        );
     } finally {
-      setIsLoadingArticles(false);
+      if (generation === authGeneration.current) setIsRestoringSession(false);
     }
-  }, [accessToken]);
-
-  const refreshArchiveArticles = useCallback(async () => {
-    if (!accessToken) return;
-
-    setIsLoadingArchive(true);
-    setErrorMessage(null);
-
-    try {
-      const articles = await readnestApi.listArticles(accessToken, {
-        period: mapArchiveTabToPeriod(activeArchiveTab),
-        readStatus: archiveReadFilter === "ALL" ? undefined : archiveReadFilter,
-        search: archiveSearch,
-        limit: 100,
-      });
-      setArchiveThreads(articles.map(mapArticleToThread));
-    } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "아카이브를 불러오지 못했습니다.",
-      );
-    } finally {
-      setIsLoadingArchive(false);
-    }
-  }, [accessToken, activeArchiveTab, archiveReadFilter, archiveSearch]);
-
-  useEffect(() => {
-    void refreshArticles();
-  }, [refreshArticles]);
-
-  useEffect(() => {
-    if (screen !== "archive") return;
-
-    const timeoutId = setTimeout(() => {
-      void refreshArchiveArticles();
-    }, 250);
-
-    return () => {
-      clearTimeout(timeoutId);
-    };
-  }, [refreshArchiveArticles, screen]);
-
-  useEffect(() => {
-    const restoreSession = async () => {
-      try {
-        const storedToken = await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
-
-        if (!storedToken) return;
-
-        const me = await readnestApi.me(storedToken);
-        setAccessToken(storedToken);
-        setUser(me);
-      } catch {
-        await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
-      } finally {
-        setIsRestoringSession(false);
-      }
-    };
-
-    void restoreSession();
   }, []);
+  useEffect(() => {
+    void restoreSession();
+    return () => {
+      ++authGeneration.current;
+    };
+  }, [restoreSession]);
 
   useEffect(() => {
     const handleIncomingUrl = (incomingUrl: string | null) => {
       if (!incomingUrl) return;
-
-      const parsed = ExpoLinking.parse(incomingUrl);
-      const sharedUrl = parsed.queryParams?.url;
-
+      const sharedUrl = ExpoLinking.parse(incomingUrl).queryParams?.url;
       if (typeof sharedUrl === "string") {
         setUrl(sharedUrl);
         setPendingSharedUrl(sharedUrl);
+        setScreen("home");
       }
     };
-
-    ExpoLinking.getInitialURL()
-      .then(handleIncomingUrl)
-      .catch(() => undefined);
-
-    const subscription = ExpoLinking.addEventListener("url", (event) => {
-      handleIncomingUrl(event.url);
-    });
-
-    return () => {
-      subscription.remove();
-    };
+    void ExpoLinking.getInitialURL().then(handleIncomingUrl);
+    const subscription = ExpoLinking.addEventListener("url", (event) =>
+      handleIncomingUrl(event.url),
+    );
+    return () => subscription.remove();
   }, []);
 
   const saveThreadUrl = async () => {
-    if (!accessToken) return;
-
+    if (!accessToken || saveInFlight.current) return;
     if (!url.trim()) {
       Alert.alert(
-        "URL을 입력해 주세요",
-        "Threads 링크를 붙여넣으면 저장할 수 있습니다.",
+        "링크를 입력해 주세요",
+        "Threads 게시물 링크를 붙여넣어 주세요.",
       );
       return;
     }
-
+    saveInFlight.current = true;
     setIsSavingArticle(true);
-    setErrorMessage(null);
-
+    setSaveNotice(null);
+    const generation = authGeneration.current;
     try {
       const article = await readnestApi.createArticle(accessToken, {
         url: url.trim(),
       });
-      const nextThread = mapArticleToThread(article);
-      setThreads((current) => [
-        nextThread,
-        ...current.filter((thread) => thread.id !== nextThread.id),
-      ]);
+      if (generation !== authGeneration.current) return;
+      library.acceptCreated(article);
       setUrl("");
       setPendingSharedUrl(null);
-      Alert.alert("저장 완료", "Threads URL이 Unwind에 저장되었습니다.");
-      setTimeout(() => {
-        void refreshArticles();
-        void refreshArchiveArticles();
-      }, 2500);
+      setSaveNotice("저장했어요. 요약이 준비되면 이 화면에 표시됩니다.");
     } catch (error) {
-      Alert.alert(
-        "저장 실패",
-        error instanceof Error
-          ? error.message
-          : "URL 저장 중 문제가 발생했습니다.",
-      );
-    } finally {
-      setIsSavingArticle(false);
-    }
-  };
-
-  const openThread = async (thread: SavedThread) => {
-    setSelectedThread(thread);
-
-    if (!accessToken) return;
-
-    try {
-      const article = await readnestApi.getArticle(accessToken, thread.id);
-      const detailedThread = mapArticleToThread(article);
-      setSelectedThread(detailedThread);
-      setThreads((current) =>
-        current.map((item) =>
-          item.id === detailedThread.id ? detailedThread : item,
-        ),
-      );
-      setArchiveThreads((current) =>
-        current.map((item) =>
-          item.id === detailedThread.id ? detailedThread : item,
-        ),
-      );
-    } catch {
-      // Keep the list item open if the detail refresh fails.
-    }
-  };
-
-  const changeThreadReadStatus = async (
-    thread: SavedThread,
-    nextStatus: SavedThread["readStatus"],
-    options: { silent?: boolean } = {},
-  ) => {
-    if (!accessToken) return;
-
-    const version = (readStatusVersions.current.get(thread.id) ?? 0) + 1;
-    readStatusVersions.current.set(thread.id, version);
-
-    try {
-      const article = await readnestApi.updateReadStatus(
-        accessToken,
-        thread.id,
-        nextStatus,
-      );
-      const nextThread = mapArticleToThread(article);
-      if (readStatusVersions.current.get(thread.id) !== version) return;
-
-      setThreads((current) =>
-        current.map((item) => (item.id === nextThread.id ? nextThread : item)),
-      );
-      setArchiveThreads((current) =>
-        current.map((item) => (item.id === nextThread.id ? nextThread : item)),
-      );
-      setSelectedThread((current) =>
-        current?.id === nextThread.id ? nextThread : current,
-      );
-      void refreshArchiveArticles();
-    } catch (error) {
-      if (!options.silent) {
+      if (generation === authGeneration.current)
         Alert.alert(
-          "상태 변경 실패",
+          "저장하지 못했어요",
           error instanceof Error
             ? error.message
-            : "읽음 상태를 변경하지 못했습니다.",
+            : "연결을 확인하고 다시 시도해 주세요.",
         );
-        return;
-      }
-      throw error;
-    }
-  };
-
-  const markThreadReadOnOpen = async (thread: SavedThread) => {
-    if (
-      !accessToken ||
-      thread.readStatus !== "UNREAD" ||
-      autoReadInFlight.current.has(thread.id)
-    ) {
-      return;
-    }
-
-    autoReadInFlight.current.add(thread.id);
-    try {
-      await changeThreadReadStatus(thread, "READ", { silent: true });
-    } catch (error) {
-      console.warn("[read-status] automatic read failed", {
-        articleId: thread.id,
-        error,
-      });
     } finally {
-      autoReadInFlight.current.delete(thread.id);
-    }
-  };
-
-  const updateThreadReadStatus = async (thread: SavedThread) => {
-    await changeThreadReadStatus(
-      thread,
-      thread.readStatus === "READ" ? "UNREAD" : "READ",
-    );
-  };
-
-  const markThreadReadLater = async (thread: SavedThread) => {
-    await changeThreadReadStatus(thread, "READ_LATER");
-  };
-
-  const pollSummaryUntilSettled = async (articleId: string) => {
-    if (!accessToken) return;
-
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      try {
-        const article = await readnestApi.getArticle(accessToken, articleId);
-        const nextThread = mapArticleToThread(article);
-
-        setThreads((current) =>
-          current.map((item) =>
-            item.id === nextThread.id ? nextThread : item,
-          ),
-        );
-        setArchiveThreads((current) =>
-          current.map((item) =>
-            item.id === nextThread.id ? nextThread : item,
-          ),
-        );
-        setSelectedThread((current) =>
-          current?.id === nextThread.id ? nextThread : current,
-        );
-
-        if (
-          nextThread.processStatus !== "SAVED" &&
-          nextThread.processStatus !== "SUMMARIZING"
-        ) {
-          return;
-        }
-      } catch {
-        // A temporary refresh failure should not cancel the bounded status poll.
+      if (generation === authGeneration.current) {
+        saveInFlight.current = false;
+        setIsSavingArticle(false);
       }
     }
   };
 
-  const retryThreadSummary = async (thread: SavedThread) => {
-    if (!accessToken) return;
-
+  const changeRead = async (
+    thread: SavedThread,
+    status: SavedThread["readStatus"],
+  ) => {
     try {
-      const article = await readnestApi.retrySummary(accessToken, thread.id);
-      const nextThread = mapArticleToThread(article);
-
-      setThreads((current) =>
-        current.map((item) => (item.id === nextThread.id ? nextThread : item)),
+      await library.changeRead(thread, status);
+    } catch {
+      Alert.alert(
+        "읽음 상태를 저장하지 못했어요",
+        "연결을 확인하고 같은 상태로 다시 설정해 주세요.",
       );
-      setArchiveThreads((current) =>
-        current.map((item) => (item.id === nextThread.id ? nextThread : item)),
-      );
-      setSelectedThread(nextThread);
-      Alert.alert("재시도 시작", "요약을 다시 생성하고 있습니다.");
-      void pollSummaryUntilSettled(thread.id);
+    }
+  };
+  const retry = async (thread: SavedThread) => {
+    try {
+      await library.retry(thread);
     } catch (error) {
       Alert.alert(
-        "재시도 실패",
+        "요약 요청을 확인하지 못했어요",
         error instanceof Error
           ? error.message
-          : "요약 재시도를 시작하지 못했습니다.",
+          : "연결을 확인한 뒤 다시 시도해 주세요.",
       );
     }
   };
-
-  const shareThreadSummary = async (thread: SavedThread) => {
+  const share = async (thread: SavedThread) => {
     try {
-      await Share.share({
-        message: formatThreadShareText(thread),
-      });
-    } catch (error) {
-      Alert.alert(
-        "공유 실패",
-        error instanceof Error ? error.message : "요약을 공유하지 못했습니다.",
-      );
+      await Share.share({ message: formatThreadShareText(thread) });
+    } catch {
+      Alert.alert("공유하지 못했어요", "잠시 후 다시 시도해 주세요.");
     }
   };
-
-  const deleteThread = async (thread: SavedThread) => {
-    if (!accessToken) return;
-
-    Alert.alert("요약본 삭제", "이 저장글과 AI 요약을 삭제할까요?", [
-      {
-        text: "취소",
-        style: "cancel",
-      },
-      {
-        text: "삭제",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await readnestApi.deleteArticle(accessToken, thread.id);
-            setThreads((current) =>
-              current.filter((item) => item.id !== thread.id),
-            );
-            setArchiveThreads((current) =>
-              current.filter((item) => item.id !== thread.id),
-            );
-            setSelectedThread(null);
-          } catch (error) {
-            Alert.alert(
-              "삭제 실패",
-              error instanceof Error
-                ? error.message
-                : "요약본을 삭제하지 못했습니다.",
-            );
-          }
+  const remove = (thread: SavedThread) => {
+    Alert.alert(
+      "이 콘텐츠를 삭제할까요?",
+      `“${thread.title}”을 삭제합니다.\n삭제한 콘텐츠는 목록에서 제거되며 복구할 수 없습니다.`,
+      [
+        { text: "취소", style: "cancel" },
+        {
+          text: "삭제",
+          style: "destructive",
+          onPress: () => {
+            void library
+              .remove(thread)
+              .catch(() =>
+                Alert.alert(
+                  "삭제하지 못했어요",
+                  "연결을 확인하고 다시 시도해 주세요.",
+                ),
+              );
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
-
   const handleAuthSuccess = async (response: {
     accessToken: string;
     user: ApiUser;
   }) => {
-    await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, response.accessToken);
+    ++authGeneration.current;
+    await tokenStorage.set(response.accessToken);
     setAccessToken(response.accessToken);
     setUser(response.user);
     setScreen("home");
-    setErrorMessage(null);
+    setSessionError(null);
   };
-
   const logout = async () => {
-    await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
+    ++authGeneration.current;
+    saveInFlight.current = false;
+    setIsSavingArticle(false);
     setAccessToken(null);
     setUser(null);
-    setThreads([]);
-    setArchiveThreads([]);
-    setSelectedThread(null);
     setScreen("home");
+    setArchiveSearch("");
+    setSaveNotice(null);
+    await tokenStorage.clear();
   };
-
-  if (isRestoringSession) {
-    return (
-      <SafeAreaProvider>
-        <SafeAreaView style={styles.safeArea}>
-          <StatusBar style="dark" />
-          <View style={styles.authRoot}>
-            <Text style={styles.loadingText}>로그인 상태를 확인하는 중...</Text>
-          </View>
-        </SafeAreaView>
-      </SafeAreaProvider>
-    );
-  }
-
-  if (!accessToken || !user) {
-    return (
-      <SafeAreaProvider>
-        <SafeAreaView style={styles.safeArea}>
-          <StatusBar style="dark" />
-          <AuthScreen onAuthSuccess={handleAuthSuccess} />
-        </SafeAreaView>
-      </SafeAreaProvider>
-    );
-  }
+  const selected = library.selectedThread;
+  const showUnread = () => {
+    setScreen("archive");
+    setArchiveReadFilter("UNREAD");
+    setActiveArchiveTab("전체 기간");
+  };
 
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.safeArea}>
         <StatusBar style="dark" />
-        {selectedThread ? (
-          <ThreadDetailScreen
-            thread={selectedThread}
-            onBack={() => setSelectedThread(null)}
-            onMarkReadOnOpen={markThreadReadOnOpen}
-            onToggleReadStatus={updateThreadReadStatus}
-            onMarkReadLater={markThreadReadLater}
-            onRetrySummary={retryThreadSummary}
-            onShareSummary={shareThreadSummary}
-            onDelete={deleteThread}
-          />
-        ) : (
-          <KeyboardAvoidingView
-            style={styles.app}
-            behavior={Platform.select({ ios: "padding", android: undefined })}
-          >
-            <AppHeader
-              subtitle={
-                screen === "home"
-                  ? "Threads에서 발견한 좋은 글을 저장하고 요약하세요."
-                  : undefined
-              }
-            />
-            <ScrollView
-              contentContainerStyle={styles.content}
-              showsVerticalScrollIndicator={false}
+        {isRestoringSession ? (
+          <View style={styles.authRoot}>
+            <Text style={styles.loadingText}>로그인 상태를 확인하는 중…</Text>
+          </View>
+        ) : sessionError ? (
+          <View style={styles.authRoot}>
+            <Text accessibilityRole="header" style={styles.authTitle}>
+              잠시 연결이 끊겼어요
+            </Text>
+            <Text style={styles.authSubtitle}>{sessionError}</Text>
+            <Pressable
+              accessibilityRole="button"
+              style={styles.primaryButton}
+              onPress={() => void restoreSession()}
             >
-              {screen === "home" ? (
-                <HomeScreen
-                  url={url}
-                  onChangeUrl={setUrl}
-                  onSave={saveThreadUrl}
-                  isSaving={isSavingArticle}
-                  isLoading={isLoadingArticles}
-                  errorMessage={errorMessage}
-                  pendingSharedUrl={pendingSharedUrl}
-                  todayReadingThreads={todayReadingThreads}
-                  todayThreads={todayThreads}
-                  summarizingThreads={summarizingThreads}
-                  unreadThreads={unreadThreads}
-                  onShowUnread={() => {
-                    setScreen("archive");
-                    setArchiveReadFilter("UNREAD");
-                    setActiveArchiveTab("월별 아카이브");
-                  }}
-                  onOpenThread={(thread) => void openThread(thread)}
-                />
+              <Text style={styles.primaryButtonText}>다시 연결</Text>
+            </Pressable>
+          </View>
+        ) : !accessToken || !user ? (
+          <AuthScreen onAuthSuccess={handleAuthSuccess} />
+        ) : (
+          <View style={styles.app}>
+            <View
+              style={[styles.app, selected && styles.hiddenScreen]}
+              accessibilityElementsHidden={!!selected}
+              importantForAccessibility={
+                selected ? "no-hide-descendants" : "auto"
+              }
+            >
+              <AppHeader />
+              {library.syncError ? (
+                <View style={styles.syncNotice}>
+                  <Text style={styles.syncNoticeText}>{library.syncError}</Text>
+                </View>
               ) : null}
               {screen === "archive" ? (
                 <ArchiveScreen
@@ -563,17 +292,72 @@ export default function App() {
                   onChangeSearch={setArchiveSearch}
                   readFilter={archiveReadFilter}
                   onChangeReadFilter={setArchiveReadFilter}
-                  threads={archiveThreads}
-                  isLoading={isLoadingArchive}
-                  onOpenThread={(thread) => void openThread(thread)}
+                  threads={library.archiveThreads}
+                  isLoading={library.archiveLoading}
+                  loadingMore={library.loadingMore}
+                  error={library.archiveError}
+                  hasMore={!!library.nextCursor}
+                  onRefresh={() => void library.refreshArchive()}
+                  onLoadMore={() => void library.refreshArchive(true)}
+                  onOpenThread={(thread) => void library.open(thread)}
                 />
-              ) : null}
-              {screen === "settings" ? (
-                <SettingsScreen user={user} onLogout={logout} />
-              ) : null}
-            </ScrollView>
-            <BottomNav current={screen} onChange={setScreen} />
-          </KeyboardAvoidingView>
+              ) : (
+                <ScrollView
+                  contentContainerStyle={styles.content}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {screen === "home" ? (
+                    <HomeScreen
+                      url={url}
+                      onChangeUrl={setUrl}
+                      onSave={() => void saveThreadUrl()}
+                      isSaving={isSavingArticle}
+                      isLoading={library.homeLoading}
+                      hasLoaded={library.homeHasLoaded}
+                      errorMessage={library.homeError}
+                      pendingSharedUrl={pendingSharedUrl}
+                      threads={library.homeThreads}
+                      saveNotice={saveNotice}
+                      onRefresh={() => void library.refreshHome()}
+                      onShowUnread={showUnread}
+                      onOpenThread={(thread) => void library.open(thread)}
+                    />
+                  ) : (
+                    <SettingsScreen
+                      user={user}
+                      onLogout={() => void logout()}
+                    />
+                  )}
+                </ScrollView>
+              )}
+              <BottomNav current={screen} onChange={setScreen} />
+            </View>
+            {selected ? (
+              <ThreadDetailScreen
+                key={selected.id}
+                thread={selected}
+                onBack={library.close}
+                onMarkReadOnOpen={(thread) =>
+                  library.changeRead(thread, "READ", true)
+                }
+                onToggleReadStatus={(thread) =>
+                  void changeRead(
+                    thread,
+                    thread.readStatus === "READ" ? "UNREAD" : "READ",
+                  )
+                }
+                onMarkReadLater={(thread) =>
+                  void changeRead(thread, "READ_LATER")
+                }
+                onRetrySummary={retry}
+                onShareSummary={(thread) => void share(thread)}
+                onDelete={remove}
+                loadingDetail={library.detailLoading}
+                detailError={library.detailError}
+                onRefresh={() => void library.fetchDetail(selected.id, true)}
+              />
+            ) : null}
+          </View>
         )}
       </SafeAreaView>
     </SafeAreaProvider>
@@ -592,7 +376,10 @@ function formatThreadShareText(thread: SavedThread) {
 function AuthScreen({
   onAuthSuccess,
 }: {
-  onAuthSuccess: (response: { accessToken: string; user: ApiUser }) => void;
+  onAuthSuccess: (response: {
+    accessToken: string;
+    user: ApiUser;
+  }) => void | Promise<void>;
 }) {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
@@ -602,6 +389,7 @@ function AuthScreen({
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
+    if (isSubmitting) return;
     setIsSubmitting(true);
     setError(null);
 
@@ -611,7 +399,7 @@ function AuthScreen({
           ? await readnestApi.login({ email, password })
           : await readnestApi.signup({ email, password, nickname });
 
-      onAuthSuccess(response);
+      await onAuthSuccess(response);
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -647,6 +435,7 @@ function AuthScreen({
           value={email}
           onChangeText={setEmail}
           placeholder="이메일"
+          accessibilityLabel="이메일"
           placeholderTextColor={colors.faint}
           autoCapitalize="none"
           keyboardType="email-address"
@@ -656,6 +445,7 @@ function AuthScreen({
           value={password}
           onChangeText={setPassword}
           placeholder="비밀번호"
+          accessibilityLabel="비밀번호"
           placeholderTextColor={colors.faint}
           secureTextEntry
           style={styles.authInput}
@@ -665,6 +455,7 @@ function AuthScreen({
             value={nickname}
             onChangeText={setNickname}
             placeholder="닉네임"
+            accessibilityLabel="닉네임"
             placeholderTextColor={colors.faint}
             style={styles.authInput}
           />
@@ -672,7 +463,13 @@ function AuthScreen({
 
         {error ? <Text style={styles.authError}>{error}</Text> : null}
 
-        <Pressable style={styles.primaryButton} onPress={submit}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: isSubmitting }}
+          disabled={isSubmitting}
+          style={styles.primaryButton}
+          onPress={() => void submit()}
+        >
           <Text style={styles.primaryButtonText}>
             {isSubmitting
               ? "처리 중..."
@@ -683,6 +480,7 @@ function AuthScreen({
         </Pressable>
 
         <Pressable
+          accessibilityRole="button"
           style={styles.modeButton}
           onPress={() => {
             setMode((current) => (current === "login" ? "signup" : "login"));
@@ -706,154 +504,268 @@ type HomeProps = {
   onSave: () => void;
   isSaving: boolean;
   isLoading: boolean;
+  hasLoaded: boolean;
   errorMessage: string | null;
   pendingSharedUrl: string | null;
-  todayReadingThreads: SavedThread[];
-  todayThreads: SavedThread[];
-  summarizingThreads: SavedThread[];
-  unreadThreads: SavedThread[];
+  threads: SavedThread[];
+  saveNotice: string | null;
+  onRefresh: () => void;
   onShowUnread: () => void;
   onOpenThread: (thread: SavedThread) => void;
 };
 
-function HomeScreen({
+function Feedback({
+  text,
+  action,
+  onAction,
+}: {
+  text: string;
+  action?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <View style={styles.feedback}>
+      <Text style={styles.feedbackText} accessibilityLiveRegion="polite">
+        {text}
+      </Text>
+      {action && onAction ? (
+        <Pressable
+          accessibilityRole="button"
+          style={styles.textButton}
+          onPress={onAction}
+        >
+          <Text style={styles.textButtonText}>{action}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+export function HomeScreen({
   url,
   onChangeUrl,
   onSave,
   isSaving,
   isLoading,
+  hasLoaded,
   errorMessage,
   pendingSharedUrl,
-  todayReadingThreads,
-  todayThreads,
-  summarizingThreads,
-  unreadThreads,
+  threads,
+  saveNotice,
+  onRefresh,
   onShowUnread,
   onOpenThread,
 }: HomeProps) {
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const initialCaptureDecision = useRef(false);
+  useEffect(() => {
+    if (hasLoaded && !initialCaptureDecision.current) {
+      initialCaptureDecision.current = true;
+      if (!threads.length) setCaptureOpen(true);
+    }
+  }, [hasLoaded, threads.length]);
+  useEffect(() => {
+    if (pendingSharedUrl) setCaptureOpen(true);
+  }, [pendingSharedUrl]);
+  useEffect(() => {
+    if (saveNotice) setCaptureOpen(false);
+  }, [saveNotice]);
+  const captureVisible = captureOpen;
+  const processing = threads.filter(isProcessing);
+  const failed = threads.filter(
+    (thread) => thread.processStatus === "SUMMARY_FAILED",
+  );
+  const readable = threads.filter(
+    (thread) =>
+      !isProcessing(thread) && thread.processStatus !== "SUMMARY_FAILED",
+  );
+  const reading = readable
+    .filter((thread) => thread.readStatus !== "READ")
+    .sort(
+      (a, b) =>
+        Number(a.readStatus !== "READ_LATER") -
+        Number(b.readStatus !== "READ_LATER"),
+    )
+    .slice(0, 6);
+  const readingIds = new Set(reading.map((thread) => thread.id));
+  const recent = readable
+    .filter((thread) => !readingIds.has(thread.id))
+    .slice(0, 6);
   return (
     <View>
-      <View style={styles.savePanel}>
-        <View style={styles.saveHeader}>
-          <Ionicons name="link-outline" size={20} color={colors.primary} />
-          <Text style={styles.panelTitle}>Threads URL 저장</Text>
-        </View>
-        <TextInput
-          value={url}
-          onChangeText={onChangeUrl}
-          placeholder="https://www.threads.net/..."
-          placeholderTextColor={colors.faint}
-          autoCapitalize="none"
-          autoCorrect={false}
-          style={styles.urlInput}
-        />
-        <Pressable style={styles.primaryButton} onPress={onSave}>
-          <Text style={styles.primaryButtonText}>
-            {isSaving ? "저장 중..." : "Save Thread"}
+      <View style={styles.homeHeading}>
+        <View style={styles.flexContent}>
+          <Text accessibilityRole="header" style={styles.screenTitle}>
+            다시 꺼내 읽는 생각
           </Text>
+          <Text style={styles.homeDescription}>
+            저장한 글의 핵심부터 가볍게 살펴보세요.
+          </Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            captureVisible ? "링크 저장 입력 닫기" : "링크 저장"
+          }
+          accessibilityState={{ expanded: captureVisible }}
+          style={styles.captureToggle}
+          onPress={() => {
+            initialCaptureDecision.current = true;
+            setCaptureOpen((value) => !value);
+          }}
+        >
+          <Ionicons
+            name={captureVisible ? "close-outline" : "add-outline"}
+            size={22}
+            color={colors.primary}
+          />
+          <Text style={styles.textButtonText}>링크</Text>
         </Pressable>
       </View>
-
-      {errorMessage ? (
-        <View style={styles.errorPanel}>
-          <Text style={styles.errorText}>{errorMessage}</Text>
-          <Text style={styles.errorHint}>API 서버 주소: {API_BASE_URL}</Text>
-        </View>
-      ) : null}
-
-      {pendingSharedUrl ? (
-        <View style={styles.infoPanel}>
-          <Text style={styles.infoText}>
-            공유된 URL을 감지했습니다. Save Thread를 누르면 저장됩니다.
-          </Text>
-        </View>
-      ) : null}
-
-      {isLoading ? (
-        <Text style={styles.loadingText}>저장글을 불러오는 중...</Text>
-      ) : null}
-
-      <Section
-        title="오늘 읽을 글"
-        count={todayReadingThreads.length}
-        description={
-          todayReadingThreads.length
-            ? "저장해두고 아직 읽지 않은 글을 골랐어요"
-            : "오늘은 밀린 글이 없어요"
-        }
-      >
-        {todayReadingThreads.length ? (
-          <>
-            <Text style={styles.gentleHint}>
-              오늘은 이 3개만 가볍게 읽어보세요.
+      {captureVisible ? (
+        <View style={styles.savePanel}>
+          <Text style={styles.panelTitle}>Threads 링크 저장</Text>
+          <Text style={styles.inputLabel}>게시물 링크</Text>
+          <TextInput
+            value={url}
+            onChangeText={onChangeUrl}
+            placeholder="https://www.threads.com/@..."
+            placeholderTextColor={colors.muted}
+            accessibilityLabel="Threads 게시물 링크"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            style={styles.urlInput}
+          />
+          {pendingSharedUrl ? (
+            <Text style={styles.sectionDescription}>
+              공유한 링크를 확인했어요. 저장을 눌러주세요.
             </Text>
-            {todayReadingThreads.map((thread) => (
-              <ThreadCard
-                key={thread.id}
-                thread={thread}
-                onPress={onOpenThread}
-              />
-            ))}
-            <Pressable style={styles.textButton} onPress={onShowUnread}>
-              <Text style={styles.textButtonText}>안 읽은 글 전체 보기</Text>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: isSaving }}
+            disabled={isSaving}
+            style={[styles.primaryButton, isSaving && styles.disabledControl]}
+            onPress={onSave}
+          >
+            <Text style={styles.primaryButtonText}>
+              {isSaving ? "저장 중…" : "링크 저장"}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {saveNotice ? (
+        <Text accessibilityLiveRegion="polite" style={styles.saveNotice}>
+          {saveNotice}
+        </Text>
+      ) : null}
+      {errorMessage ? (
+        <Feedback
+          text={errorMessage}
+          action="다시 불러오기"
+          onAction={onRefresh}
+        />
+      ) : null}
+      {(!hasLoaded || isLoading) && !errorMessage && !threads.length ? (
+        <View
+          accessibilityLabel="저장글 불러오는 중"
+          style={styles.skeletonGroup}
+        >
+          <View style={styles.skeletonTitle} />
+          <View style={styles.skeletonLine} />
+          <View style={styles.skeletonLine} />
+          <Text style={styles.loadingText}>저장글을 불러오는 중…</Text>
+        </View>
+      ) : null}
+      {reading.length ? (
+        <Section
+          title="다시 볼 글"
+          count={reading.length}
+          description="다시 보기로 표시한 글과 아직 읽지 않은 글이에요."
+        >
+          {reading.map((thread) => (
+            <ThreadCard
+              key={thread.id}
+              thread={thread}
+              onPress={onOpenThread}
+            />
+          ))}
+          <Pressable
+            accessibilityRole="button"
+            style={styles.textButton}
+            onPress={onShowUnread}
+          >
+            <Text style={styles.textButtonText}>안 읽은 글 전체 보기</Text>
+          </Pressable>
+        </Section>
+      ) : null}
+      {processing.length ? (
+        <View style={styles.processingSection}>
+          <Text accessibilityRole="header" style={styles.sectionTitle}>
+            요약 중 {processing.length}개
+          </Text>
+          <Text style={styles.sectionDescription}>
+            준비가 끝나면 자동으로 업데이트됩니다.
+          </Text>
+          {processing.map((thread) => (
+            <Pressable
+              key={thread.id}
+              accessibilityRole="button"
+              accessibilityLabel={thread.title + ", 요약 상태 보기"}
+              style={styles.processingRow}
+              onPress={() => onOpenThread(thread)}
+            >
+              <Ionicons name="time-outline" size={18} color={colors.primary} />
+              <Text numberOfLines={2} style={styles.processingTitle}>
+                {thread.title}
+              </Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.muted} />
             </Pressable>
-          </>
-        ) : (
-          <EmptyText text="새로운 글을 저장하면 여기에서 추천해드릴게요." />
-        )}
-      </Section>
-
-      <Section
-        title="요약 중"
-        count={summarizingThreads.length}
-        description={
-          summarizingThreads.length
-            ? "요약이 끝나면 오늘 읽을 글에 추가돼요"
-            : undefined
-        }
-      >
-        {summarizingThreads.length ? (
-          summarizingThreads.map((thread) => (
-            <ThreadCard
-              key={thread.id}
-              thread={thread}
-              onPress={onOpenThread}
-              compact
-            />
-          ))
-        ) : (
-          <EmptyText text="현재 요약 중인 Thread가 없습니다." />
-        )}
-      </Section>
-
-      <Section title="오늘 저장한 글" count={todayThreads.length}>
-        {todayThreads.length ? (
-          todayThreads.map((thread) => (
+          ))}
+        </View>
+      ) : null}
+      {failed.length ? (
+        <Section
+          title="확인이 필요한 글"
+          count={failed.length}
+          description="글을 열어 원인을 확인하고 다시 시도할 수 있어요."
+        >
+          {failed.map((thread) => (
             <ThreadCard
               key={thread.id}
               thread={thread}
               onPress={onOpenThread}
             />
-          ))
-        ) : (
-          <EmptyText text="오늘 저장한 Thread가 없습니다." />
-        )}
-      </Section>
-
-      <Section title="안 읽음" count={unreadThreads.length}>
-        {unreadThreads.length ? (
-          unreadThreads.map((thread) => (
+          ))}
+        </Section>
+      ) : null}
+      {recent.length ? (
+        <Section title="최근 저장한 글" count={recent.length}>
+          {recent.map((thread) => (
             <ThreadCard
               key={thread.id}
               thread={thread}
               onPress={onOpenThread}
-              compact
             />
-          ))
-        ) : (
-          <EmptyText text="안 읽은 Thread가 없습니다." />
-        )}
-      </Section>
+          ))}
+        </Section>
+      ) : null}
+      {hasLoaded && !isLoading && !errorMessage && !threads.length ? (
+        <Feedback text="처음 저장한 글이 여기에 모입니다. 읽다가 다시 떠올리고 싶은 글의 링크를 저장해 보세요." />
+      ) : null}
+      {!isLoading &&
+      threads.length > 0 &&
+      !reading.length &&
+      !recent.length &&
+      !processing.length &&
+      !failed.length ? (
+        <Feedback
+          text="새로 저장한 글을 확인하고 있어요."
+          action="새로고침"
+          onAction={onRefresh}
+        />
+      ) : null}
     </View>
   );
 }
@@ -867,6 +779,11 @@ function ArchiveScreen({
   onChangeReadFilter,
   threads,
   isLoading,
+  loadingMore,
+  error,
+  hasMore,
+  onRefresh,
+  onLoadMore,
   onOpenThread,
 }: {
   activeTab: string;
@@ -877,101 +794,175 @@ function ArchiveScreen({
   onChangeReadFilter: (filter: ArchiveReadFilter) => void;
   threads: SavedThread[];
   isLoading: boolean;
+  loadingMore: boolean;
+  error: string | null;
+  hasMore: boolean;
+  onRefresh: () => void;
+  onLoadMore: () => void;
   onOpenThread: (thread: SavedThread) => void;
 }) {
-  const readFilters: Array<{ label: string; value: ArchiveReadFilter }> = [
+  const filters: Array<{ label: string; value: ArchiveReadFilter }> = [
     { label: "전체", value: "ALL" },
     { label: "안 읽음", value: "UNREAD" },
     { label: "읽음", value: "READ" },
     { label: "다시 보기", value: "READ_LATER" },
   ];
-
+  const filtered =
+    !!search.trim() || readFilter !== "ALL" || activeTab !== "전체 기간";
   return (
-    <View>
-      <Text style={styles.screenTitle}>아카이브</Text>
-      <View style={styles.searchBox}>
-        <Ionicons name="search-outline" size={18} color={colors.faint} />
-        <TextInput
-          value={search}
-          onChangeText={onChangeSearch}
-          placeholder="저장된 Thread 검색"
-          placeholderTextColor={colors.faint}
-          style={styles.searchInput}
-        />
-        <Ionicons name="options-outline" size={20} color={colors.muted} />
-      </View>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterScroller}
-      >
-        <View style={styles.filterRow}>
-          {readFilters.map((filter) => {
-            const active = readFilter === filter.value;
-            return (
-              <Pressable
-                key={filter.value}
-                onPress={() => onChangeReadFilter(filter.value)}
-                style={[styles.filterChip, active && styles.activeFilterChip]}
-              >
-                <Text
-                  style={[
-                    styles.filterChipText,
-                    active && styles.activeFilterChipText,
-                  ]}
-                >
-                  {filter.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </ScrollView>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.tabScroller}
-      >
-        <View style={styles.tabs}>
-          {archiveTabs.map((tab) => {
-            const active = tab === activeTab;
-            return (
-              <Pressable
-                key={tab}
-                onPress={() => onChangeTab(tab)}
-                style={[styles.tab, active && styles.activeTab]}
-              >
-                <Text style={[styles.tabText, active && styles.activeTabText]}>
-                  {tab}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </ScrollView>
-
-      <DateHeader label="저장된 Thread" />
-      {isLoading ? (
-        <Text style={styles.loadingText}>아카이브를 불러오는 중...</Text>
-      ) : null}
-      {threads.length ? (
-        threads.map((thread) => (
-          <ThreadCard
-            key={thread.id}
-            thread={thread}
-            onPress={onOpenThread}
-            compact
-          />
-        ))
-      ) : (
-        <EmptyText text="저장된 Thread가 없습니다." />
+    <FlatList
+      data={threads}
+      keyExtractor={(thread) => thread.id}
+      renderItem={({ item }) => (
+        <ThreadCard thread={item} onPress={onOpenThread} />
       )}
-    </View>
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+      refreshing={isLoading && !!threads.length}
+      onRefresh={onRefresh}
+      onEndReached={() => {
+        if (hasMore && !loadingMore && !isLoading && !error) onLoadMore();
+      }}
+      onEndReachedThreshold={0.4}
+      ListHeaderComponent={
+        <View>
+          <Text accessibilityRole="header" style={styles.screenTitle}>
+            보관함
+          </Text>
+          <Text style={styles.homeDescription}>
+            저장한 생각을 다시 찾아보세요.
+          </Text>
+          <Text style={styles.inputLabel}>저장글 검색</Text>
+          <View style={styles.searchBox}>
+            <Ionicons name="search-outline" size={18} color={colors.muted} />
+            <TextInput
+              value={search}
+              onChangeText={onChangeSearch}
+              placeholder="제목이나 내용 검색"
+              accessibilityLabel="저장글 제목이나 내용 검색"
+              placeholderTextColor={colors.muted}
+              style={styles.searchInput}
+            />
+            {search ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="검색어 지우기"
+                onPress={() => onChangeSearch("")}
+                style={styles.clearSearch}
+              >
+                <Ionicons name="close-outline" size={20} color={colors.muted} />
+              </Pressable>
+            ) : null}
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterScroller}
+          >
+            <View style={styles.filterRow}>
+              {filters.map((filter) => (
+                <Pressable
+                  key={filter.value}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: readFilter === filter.value }}
+                  style={[
+                    styles.filterChip,
+                    readFilter === filter.value && styles.activeFilterChip,
+                  ]}
+                  onPress={() => onChangeReadFilter(filter.value)}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      readFilter === filter.value &&
+                        styles.activeFilterChipText,
+                    ]}
+                  >
+                    {filter.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+          <Text style={styles.inputLabel}>저장 기간</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.tabScroller}
+          >
+            <View style={styles.filterRow}>
+              {archiveTabs.map((tab) => (
+                <Pressable
+                  key={tab}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: activeTab === tab }}
+                  style={[
+                    styles.periodButton,
+                    activeTab === tab && styles.activePeriodButton,
+                  ]}
+                  onPress={() => onChangeTab(tab)}
+                >
+                  <Text
+                    style={[
+                      styles.tabText,
+                      activeTab === tab && styles.activeTabText,
+                    ]}
+                  >
+                    {tab}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+          {error ? (
+            <Feedback
+              text={error}
+              action={threads.length && hasMore ? "다시 시도" : "다시 불러오기"}
+              onAction={threads.length && hasMore ? onLoadMore : onRefresh}
+            />
+          ) : null}
+          {isLoading && !threads.length ? (
+            <View
+              accessibilityLabel="보관함 불러오는 중"
+              style={styles.skeletonGroup}
+            >
+              <View style={styles.skeletonTitle} />
+              <View style={styles.skeletonLine} />
+              <View style={styles.skeletonLine} />
+              <Text style={styles.loadingText}>보관함을 불러오는 중…</Text>
+            </View>
+          ) : null}
+        </View>
+      }
+      ListEmptyComponent={
+        !isLoading && !error ? (
+          <Feedback
+            text={
+              filtered
+                ? "조건에 맞는 글이 없어요. 검색어나 필터를 바꿔보세요."
+                : "아직 저장한 글이 없어요. 홈에서 링크를 저장해 보세요."
+            }
+          />
+        ) : null
+      }
+      ListFooterComponent={
+        loadingMore ? (
+          <Text style={styles.loadingText}>더 불러오는 중…</Text>
+        ) : hasMore && !error ? (
+          <Pressable
+            accessibilityRole="button"
+            style={styles.moreButton}
+            onPress={onLoadMore}
+          >
+            <Text style={styles.textButtonText}>더 불러오기</Text>
+          </Pressable>
+        ) : threads.length ? (
+          <Text style={styles.endOfList}>저장글을 모두 확인했어요.</Text>
+        ) : null
+      }
+    />
   );
 }
-
 function SettingsScreen({
   user,
   onLogout,
@@ -981,7 +972,9 @@ function SettingsScreen({
 }) {
   return (
     <View>
-      <Text style={styles.screenTitle}>설정</Text>
+      <Text accessibilityRole="header" style={styles.screenTitle}>
+        설정
+      </Text>
       <View style={styles.settingsCard}>
         <SettingRow label="계정" value={user.email} icon="person-outline" />
         <SettingRow
@@ -992,7 +985,11 @@ function SettingsScreen({
         <SettingRow label="요약 언어" value="한국어" icon="language-outline" />
         <SettingRow label="저장 대상" value="Threads only" icon="at-outline" />
       </View>
-      <Pressable style={styles.logoutButton} onPress={onLogout}>
+      <Pressable
+        accessibilityRole="button"
+        style={styles.logoutButton}
+        onPress={onLogout}
+      >
         <Text style={styles.logoutText}>로그아웃</Text>
       </Pressable>
     </View>
@@ -1013,7 +1010,9 @@ function Section({
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{title}</Text>
+        <Text accessibilityRole="header" style={styles.sectionTitle}>
+          {title}
+        </Text>
         <Text style={styles.sectionCount}>{count}</Text>
       </View>
       {description ? (
@@ -1022,18 +1021,6 @@ function Section({
       {children}
     </View>
   );
-}
-
-function DateHeader({ label }: { label: string }) {
-  return (
-    <View style={styles.dateHeader}>
-      <Text style={styles.dateHeaderText}>{label}</Text>
-    </View>
-  );
-}
-
-function EmptyText({ text }: { text: string }) {
-  return <Text style={styles.emptyText}>{text}</Text>;
 }
 
 function SettingRow({
@@ -1057,6 +1044,114 @@ function SettingRow({
 }
 
 const styles = StyleSheet.create({
+  hiddenScreen: { display: "none" },
+  flexContent: { flex: 1 },
+  homeHeading: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  homeDescription: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 22,
+    marginBottom: spacing.md,
+  },
+  captureToggle: {
+    minHeight: 48,
+    minWidth: 64,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: colors.blueSoft,
+    paddingHorizontal: spacing.sm,
+  },
+  inputLabel: {
+    color: colors.inkSoft,
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: "600",
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  disabledControl: { opacity: 0.65 },
+  saveNotice: {
+    color: colors.inkSoft,
+    fontSize: 14,
+    lineHeight: 22,
+    marginBottom: spacing.lg,
+  },
+  feedback: {
+    backgroundColor: colors.surfaceLow,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  feedbackText: { color: colors.inkSoft, fontSize: 15, lineHeight: 24 },
+  syncNotice: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.amberSoft,
+  },
+  syncNoticeText: { color: colors.amber, fontSize: 13, lineHeight: 20 },
+  skeletonGroup: { gap: spacing.sm, marginBottom: spacing.lg },
+  skeletonTitle: {
+    width: "62%",
+    height: 24,
+    backgroundColor: colors.surfaceMid,
+    borderRadius: radius.sm,
+  },
+  skeletonLine: {
+    height: 16,
+    backgroundColor: colors.surfaceMid,
+    borderRadius: radius.sm,
+  },
+  processingSection: { marginBottom: spacing.lg },
+  processingRow: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.hairline,
+  },
+  processingTitle: {
+    flex: 1,
+    color: colors.inkSoft,
+    fontSize: 15,
+    lineHeight: 23,
+  },
+  clearSearch: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  periodButton: {
+    minHeight: 44,
+    paddingHorizontal: spacing.sm,
+    justifyContent: "center",
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  activePeriodButton: { borderBottomColor: colors.primary },
+  moreButton: {
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    marginVertical: spacing.md,
+  },
+  endOfList: {
+    textAlign: "center",
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 20,
+    padding: spacing.md,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: colors.canvas,
@@ -1068,7 +1163,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
-    paddingBottom: 104,
+    paddingBottom: spacing.xl,
   },
   authRoot: {
     flex: 1,
@@ -1116,7 +1211,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   authInput: {
-    height: 48,
+    minHeight: 48,
     borderColor: colors.hairline,
     borderWidth: 1,
     borderRadius: radius.md,
@@ -1134,6 +1229,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   modeButton: {
+    minHeight: 44,
+    justifyContent: "center",
     marginTop: spacing.md,
     alignItems: "center",
   },
@@ -1142,12 +1239,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "800",
   },
-  apiHint: {
-    color: colors.faint,
-    fontSize: 11,
-    marginTop: spacing.lg,
-    textAlign: "center",
-  },
   savePanel: {
     backgroundColor: colors.surface,
     borderColor: colors.hairline,
@@ -1155,13 +1246,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
     marginBottom: spacing.xl,
-    ...shadow.card,
-  },
-  saveHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    marginBottom: spacing.md,
   },
   panelTitle: {
     color: colors.ink,
@@ -1170,7 +1254,8 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   urlInput: {
-    height: 48,
+    minHeight: 48,
+    paddingVertical: spacing.sm,
     borderColor: colors.hairline,
     borderWidth: 1,
     borderRadius: radius.md,
@@ -1181,8 +1266,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   primaryButton: {
-    height: 46,
-    borderRadius: radius.pill,
+    minHeight: 48,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
     backgroundColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
@@ -1192,54 +1279,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
   },
-  errorPanel: {
-    backgroundColor: colors.redSoft,
-    borderColor: "#ffcdd2",
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  errorText: {
-    color: colors.red,
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 18,
-  },
-  errorHint: {
-    color: colors.muted,
-    fontSize: 11,
-    marginTop: spacing.sm,
-  },
-  infoPanel: {
-    backgroundColor: colors.blueSoft,
-    borderColor: "#c7dcff",
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  infoText: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 18,
-  },
   loadingText: {
     color: colors.muted,
     fontSize: 13,
     fontWeight: "700",
     marginBottom: spacing.md,
-  },
-  emptyText: {
-    color: colors.faint,
-    fontSize: 13,
-    lineHeight: 20,
-    backgroundColor: colors.surface,
-    borderColor: colors.hairline,
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.md,
   },
   section: {
     marginBottom: spacing.xl,
@@ -1268,32 +1312,28 @@ const styles = StyleSheet.create({
     marginTop: -spacing.xs,
     marginBottom: spacing.sm,
   },
-  gentleHint: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    lineHeight: 19,
-    marginBottom: spacing.sm,
-  },
   textButton: {
+    minHeight: 44,
+    justifyContent: "center",
     alignSelf: "flex-start",
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.xs,
   },
   textButtonText: {
-    color: colors.primary,
+    color: colors.primaryPressed,
     fontSize: 13,
     fontWeight: "800",
   },
   screenTitle: {
     color: colors.ink,
-    fontSize: 30,
+    fontSize: 26,
     lineHeight: 34,
-    fontWeight: "800",
-    letterSpacing: -1,
-    marginBottom: spacing.lg,
+    fontWeight: "700",
+    letterSpacing: -0.5,
+    marginBottom: spacing.sm,
   },
   searchBox: {
-    height: 50,
+    minHeight: 48,
     backgroundColor: colors.surface,
     borderColor: colors.hairline,
     borderWidth: 1,
@@ -1319,9 +1359,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   filterChip: {
+    minHeight: 44,
+    justifyContent: "center",
     borderColor: colors.hairline,
     borderWidth: 1,
-    borderRadius: radius.pill,
+    borderRadius: radius.md,
     backgroundColor: colors.surface,
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -1332,31 +1374,15 @@ const styles = StyleSheet.create({
   },
   filterChipText: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "800",
   },
   activeFilterChipText: {
-    color: colors.primary,
+    color: colors.primaryPressed,
   },
   tabScroller: {
     marginHorizontal: -spacing.lg,
     marginBottom: spacing.lg,
-  },
-  tabs: {
-    flexDirection: "row",
-    backgroundColor: colors.surfaceMid,
-    borderRadius: radius.lg,
-    padding: 4,
-    marginHorizontal: spacing.lg,
-    gap: 4,
-  },
-  tab: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: radius.md,
-  },
-  activeTab: {
-    backgroundColor: colors.surface,
   },
   tabText: {
     color: colors.muted,
@@ -1364,358 +1390,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   activeTabText: {
-    color: colors.primary,
-  },
-  dateHeader: {
-    borderBottomColor: colors.hairline,
-    borderBottomWidth: 1,
-    paddingBottom: spacing.sm,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  dateHeaderText: {
-    color: colors.faint,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.4,
-  },
-  detailRoot: {
-    flex: 1,
-    backgroundColor: colors.canvas,
-  },
-  detailHeader: {
-    height: 64,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: spacing.lg,
-    backgroundColor: colors.paper,
-    borderBottomColor: colors.hairline,
-    borderBottomWidth: 1,
-    gap: spacing.md,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  detailBrand: {
-    color: colors.primary,
-    fontSize: 22,
-    fontWeight: "800",
-    letterSpacing: -0.6,
-  },
-  detailHeaderSpacer: {
-    flex: 1,
-  },
-  deleteIconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.redSoft,
-  },
-  detailContent: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xl,
-  },
-  sourceCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.hairline,
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  sourceTitle: {
-    color: colors.ink,
-    fontSize: 17,
-    fontWeight: "800",
-    marginBottom: spacing.xs,
-  },
-  sourceMeta: {
-    color: colors.muted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginBottom: spacing.md,
-  },
-  sourceText: {
-    color: colors.ink,
-    fontSize: 14,
-    lineHeight: 23,
-  },
-  metaLine: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-    flexWrap: "wrap",
-  },
-  sourcePillLarge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: colors.surfaceMid,
-    borderRadius: radius.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  sourceLargeText: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  savedDate: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  detailTitle: {
-    color: colors.ink,
-    fontSize: 34,
-    lineHeight: 38,
-    fontWeight: "800",
-    letterSpacing: -1.2,
-    marginBottom: spacing.md,
-  },
-  summaryMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  summaryMetaBadge: {
-    overflow: "hidden",
-    backgroundColor: colors.blueSoft,
-    color: colors.primary,
-    borderRadius: radius.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  summaryMetaText: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  detailTags: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-  },
-  detailTag: {
-    borderColor: colors.hairline,
-    borderWidth: 1,
-    borderRadius: radius.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  actionRow: {
-    flexDirection: "row",
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-    flexWrap: "wrap",
-  },
-  primaryPill: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.pill,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-  },
-  primaryPillText: {
-    color: colors.surface,
-    fontWeight: "800",
-    fontSize: 13,
-  },
-  secondaryPill: {
-    backgroundColor: colors.surface,
-    borderColor: colors.hairline,
-    borderWidth: 1,
-    borderRadius: radius.pill,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-  },
-  secondaryPillText: {
-    color: colors.primary,
-    fontWeight: "800",
-    fontSize: 13,
-  },
-  dangerPill: {
-    backgroundColor: colors.redSoft,
-    borderColor: "#ffcdd2",
-    borderWidth: 1,
-    borderRadius: radius.pill,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  dangerPillText: {
-    color: colors.red,
-    fontWeight: "800",
-    fontSize: 13,
-  },
-  retryPill: {
-    backgroundColor: colors.blueSoft,
-    borderColor: "#c7dcff",
-    borderWidth: 1,
-    borderRadius: radius.pill,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  retryPillText: {
-    color: colors.primary,
-    fontWeight: "800",
-    fontSize: 13,
-  },
-  infoNote: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: spacing.md,
-    backgroundColor: colors.surface,
-    borderColor: colors.hairline,
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  noteTextWrap: {
-    flex: 1,
-    gap: 4,
-  },
-  noteTitle: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  noteBody: {
-    color: colors.muted,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  warningNote: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: spacing.sm,
-    backgroundColor: colors.amberSoft,
-    borderColor: "#ffddb0",
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  warningText: {
-    flex: 1,
-    color: "#773200",
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: "600",
-  },
-  summaryCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.hairline,
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    ...shadow.card,
-  },
-  summaryBlock: {
-    borderLeftColor: colors.primary,
-    borderLeftWidth: 4,
-    paddingLeft: spacing.md,
-  },
-  summaryTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  summaryTitle: {
-    color: colors.primary,
-    fontSize: 18,
-    fontWeight: "800",
-  },
-  summaryText: {
-    color: colors.ink,
-    fontSize: 16,
-    lineHeight: 25,
-  },
-  summarySection: {
-    marginTop: spacing.sm,
-  },
-  summarySectionTitle: {
-    color: colors.ink,
-    fontSize: 16,
-    lineHeight: 23,
-    fontWeight: "800",
-    marginBottom: spacing.xs,
-  },
-  summaryBodyText: {
-    color: colors.ink,
-    fontSize: 15,
-    lineHeight: 24,
-    marginBottom: spacing.sm,
-  },
-  oneLineSummary: {
-    backgroundColor: colors.surfaceLow,
-    borderRadius: radius.md,
-    marginTop: spacing.md,
-    padding: spacing.md,
-  },
-  oneLineSummaryTitle: {
-    color: colors.primary,
-    fontSize: 15,
-    lineHeight: 21,
-    fontWeight: "800",
-    marginBottom: spacing.xs,
-  },
-  oneLineSummaryText: {
-    color: colors.ink,
-    fontSize: 15,
-    lineHeight: 23,
-    fontWeight: "700",
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.hairline,
-    marginVertical: spacing.lg,
-  },
-  keyPointTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: "800",
-    marginBottom: spacing.md,
-  },
-  keyPointRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: spacing.md,
-    marginBottom: spacing.md,
-  },
-  bullet: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: colors.primary,
-    marginTop: 8,
-  },
-  keyPointText: {
-    flex: 1,
-    color: colors.inkSoft,
-    fontSize: 15,
-    lineHeight: 22,
+    color: colors.primaryPressed,
   },
   settingsCard: {
     backgroundColor: colors.surface,

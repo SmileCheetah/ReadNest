@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import {
   AccessibilityInfo,
+  ActivityIndicator,
   Alert,
-  BackHandler,
   findNodeHandle,
   Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
 import type { SavedThread } from "../data/mockThreads";
@@ -20,7 +22,10 @@ import {
   isSupportedMarkdown,
   MarkdownSummary,
 } from "../components/summary/MarkdownSummary";
-import { getSummaryPresentation } from "../components/summary/summaryPresentation";
+import {
+  getSummaryErrorMessage,
+  getSummaryPresentation,
+} from "../components/summary/summaryPresentation";
 
 type Props = {
   thread: SavedThread;
@@ -31,44 +36,19 @@ type Props = {
   onRetrySummary: (thread: SavedThread) => void | Promise<void>;
   onShareSummary: (thread: SavedThread) => void;
   onDelete: (thread: SavedThread) => void;
+  loadingDetail?: boolean;
+  detailError?: string | null;
+  onRefresh?: () => void;
 };
 
-function clean(value: string) {
-  return value
-    .replace(/\*{1,3}/g, "")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function CollapsibleSection({
-  title,
-  children,
-}: {
-  title: string;
-  children: string;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <View style={styles.collapsible}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded }}
-        accessibilityLabel={`${title} ${expanded ? "접기" : "펼치기"}`}
-        hitSlop={8}
-        style={styles.collapseTrigger}
-        onPress={() => setExpanded((value) => !value)}
-      >
-        <Text style={styles.sectionTitle}>{title}</Text>
-        <Ionicons
-          name={expanded ? "chevron-up" : "chevron-down"}
-          size={20}
-          color={colors.inkSoft}
-        />
-      </Pressable>
-      {expanded ? <Text style={styles.body}>{clean(children)}</Text> : null}
-    </View>
-  );
+function focusElement(view: View | null) {
+  if (!view) return;
+  if (Platform.OS === "web") {
+    (view as View & { focus?: () => void }).focus?.();
+    return;
+  }
+  const handle = findNodeHandle(view);
+  if (handle !== null) AccessibilityInfo.setAccessibilityFocus(handle);
 }
 
 export function ThreadDetailScreen({
@@ -80,298 +60,475 @@ export function ThreadDetailScreen({
   onRetrySummary,
   onShareSummary,
   onDelete,
+  loadingDetail = false,
+  detailError,
+  onRefresh,
 }: Props) {
-  useEffect(() => {
-    if (thread.readStatus !== "UNREAD") return;
-    void onMarkReadOnOpen(thread);
-  }, [onMarkReadOnOpen, thread.id, thread.readStatus]);
-
+  const insets = useSafeAreaInsets();
   const [showSource, setShowSource] = useState(false);
+  const [sourceInfoOpen, setSourceInfoOpen] = useState(false);
   const [copyState, setCopyState] = useState<
     "idle" | "copying" | "copied" | "failed"
   >("idle");
   const [menuOpen, setMenuOpen] = useState(false);
   const [retryPending, setRetryPending] = useState(false);
-  const menuRef = useRef<View>(null);
+  const [retryWait, setRetryWait] = useState(
+    Math.max(0, thread.retryAfterSeconds ?? 0),
+  );
+  const menuTriggerRef = useRef<View>(null);
+  const menuFirstItemRef = useRef<View>(null);
+  const previousMenuOpen = useRef(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copySequence = useRef(0);
+  const copyBusy = useRef(false);
+  const retryBusy = useRef(false);
+  const readEntry = useRef<{ id: string; consumed: boolean }>({
+    id: thread.id,
+    consumed: false,
+  });
   const meta = thread.summaryMeta;
   const originalUrl = thread.originalUrl?.trim();
-  const hasSummaryMarkdown = isSupportedMarkdown(meta?.summaryMarkdown);
-  const summaryMarkdown = hasSummaryMarkdown ? meta?.summaryMarkdown : null;
+  const summaryMarkdown = isSupportedMarkdown(meta?.summaryMarkdown)
+    ? meta.summaryMarkdown
+    : null;
   const presentation = getSummaryPresentation(
     thread.processStatus,
-    hasSummaryMarkdown,
+    !!summaryMarkdown,
   );
-  const canRetry =
-    presentation === "failed" ||
-    presentation === "missing" ||
+  const processing =
+    thread.processStatus === "SAVED" || thread.processStatus === "SUMMARIZING";
+  const failed = thread.processStatus === "SUMMARY_FAILED";
+  const retryDisabled =
+    retryPending ||
+    processing ||
+    loadingDetail ||
+    !!detailError ||
+    retryWait > 0;
+  const partial =
+    thread.sourceCompleteness === "PARTIAL" ||
     thread.processStatus === "CONTEXT_INSUFFICIENT";
+  const knownSource =
+    thread.sourceCompleteness === "PARTIAL" ||
+    thread.sourceCompleteness === "COMPLETE";
+  const title = meta?.title?.trim() || thread.title || "저장한 글";
+
+  useEffect(() => {
+    if (readEntry.current.id !== thread.id)
+      readEntry.current = { id: thread.id, consumed: false };
+    if (!summaryMarkdown || readEntry.current.consumed) return;
+    readEntry.current.consumed = true;
+    if (thread.readStatus === "UNREAD") void onMarkReadOnOpen(thread);
+  }, [onMarkReadOnOpen, summaryMarkdown, thread.id, thread.readStatus]);
+
+  useEffect(() => {
+    copySequence.current += 1;
+    copyBusy.current = false;
+    setCopyState("idle");
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    return () => {
+      copySequence.current += 1;
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    };
+  }, [thread.id, summaryMarkdown]);
+
+  useEffect(() => {
+    if (!menuOpen && !previousMenuOpen.current) return;
+    previousMenuOpen.current = menuOpen;
+    const timer = setTimeout(
+      () =>
+        focusElement(
+          menuOpen ? menuFirstItemRef.current : menuTriggerRef.current,
+        ),
+      100,
+    );
+    return () => clearTimeout(timer);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    const seconds = Math.max(0, thread.retryAfterSeconds ?? 0);
+    setRetryWait(seconds);
+    if (!seconds) return;
+    const until = Date.now() + seconds * 1000;
+    const timer = setInterval(() => {
+      const left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+      setRetryWait(left);
+      if (!left) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [thread.id, thread.generation, thread.retryAfterSeconds]);
+
   const retrySummary = async () => {
-    if (retryPending) return;
+    if (retryDisabled || retryBusy.current) return;
+    retryBusy.current = true;
     setRetryPending(true);
     try {
       await onRetrySummary(thread);
+    } catch {
+      Alert.alert(
+        "요약을 요청하지 못했어요",
+        "연결 상태를 확인한 뒤 다시 시도해 주세요.",
+      );
     } finally {
+      retryBusy.current = false;
       setRetryPending(false);
     }
   };
   const copy = async () => {
-    if (copyState === "copying" || !summaryMarkdown) return;
+    if (copyBusy.current || !summaryMarkdown) return;
+    copyBusy.current = true;
+    const request = ++copySequence.current;
+    if (copyTimer.current) clearTimeout(copyTimer.current);
     setCopyState("copying");
     try {
-      const copyText = [
-        summaryMarkdown,
-        originalUrl ? `원문: ${originalUrl}` : null,
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-      await Clipboard.setStringAsync(copyText);
+      await Clipboard.setStringAsync(
+        [summaryMarkdown, originalUrl ? `원문: ${originalUrl}` : null]
+          .filter(Boolean)
+          .join("\n\n"),
+      );
+      if (request !== copySequence.current) return;
       setCopyState("copied");
+      AccessibilityInfo.announceForAccessibility(
+        "요약과 원문 링크를 복사했습니다.",
+      );
       copyTimer.current = setTimeout(() => setCopyState("idle"), 2000);
     } catch {
+      if (request !== copySequence.current) return;
       setCopyState("failed");
-      Alert.alert(
-        "복사 실패",
-        "요약을 복사하지 못했습니다. 다시 시도해 주세요.",
+      AccessibilityInfo.announceForAccessibility(
+        "복사하지 못했습니다. 다시 복사를 눌러 주세요.",
       );
+      Alert.alert(
+        "복사하지 못했어요",
+        "‘다시 복사’를 눌러 한 번 더 시도해 주세요.",
+      );
+    } finally {
+      if (request === copySequence.current) copyBusy.current = false;
     }
   };
-  useEffect(
-    () => () => {
-      if (copyTimer.current) clearTimeout(copyTimer.current);
-    },
-    [],
-  );
-  useEffect(() => {
-    if (!menuOpen) return;
-    const focusTimer = setTimeout(() => {
-      const nodeHandle = findNodeHandle(menuRef.current);
-      if (nodeHandle !== null)
-        AccessibilityInfo.setAccessibilityFocus(nodeHandle);
-    }, 100);
-    const subscription = BackHandler.addEventListener(
-      "hardwareBackPress",
-      () => {
-        setMenuOpen(false);
-        return true;
-      },
-    );
-    return () => {
-      clearTimeout(focusTimer);
-      subscription.remove();
-    };
-  }, [menuOpen]);
   const openOriginal = async () => {
     if (!originalUrl) return;
+    if (!/^https?:\/\//i.test(originalUrl)) {
+      Alert.alert("원문을 열 수 없어요", "올바른 웹 주소가 아닙니다.");
+      return;
+    }
     try {
       await Linking.openURL(originalUrl);
     } catch {
-      Alert.alert("원문을 열 수 없습니다", "잠시 후 다시 시도해 주세요.");
+      Alert.alert(
+        "원문을 열 수 없어요",
+        "연결 상태를 확인한 뒤 다시 시도해 주세요.",
+      );
     }
   };
-  const more = () => setMenuOpen(true);
   const choose = (action: () => void) => {
     setMenuOpen(false);
     action();
   };
+  const markManually = (action: (item: SavedThread) => void) => {
+    readEntry.current = { id: thread.id, consumed: true };
+    action(thread);
+  };
+  const actions = (
+    <View style={styles.actions}>
+      {originalUrl ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="원문 보기"
+          style={styles.primaryCta}
+          onPress={() => void openOriginal()}
+        >
+          <Text style={styles.primaryCtaText}>원문 보기</Text>
+          <Ionicons name="open-outline" size={18} color={colors.surface} />
+        </Pressable>
+      ) : (
+        <Text style={styles.metaLine}>원문 링크가 없습니다.</Text>
+      )}
+      {summaryMarkdown ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={copyState === "copied" ? "복사됨" : "요약 복사"}
+          accessibilityState={{ disabled: copyState === "copying" }}
+          disabled={copyState === "copying"}
+          style={styles.copyButton}
+          onPress={() => void copy()}
+        >
+          <Text style={styles.copyText}>
+            {copyState === "copied"
+              ? "✓ 복사됨"
+              : copyState === "copying"
+                ? "복사 중"
+                : copyState === "failed"
+                  ? "다시 복사"
+                  : "복사"}
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+  const retryAction = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="요약 다시 생성"
+      accessibilityState={{ disabled: retryDisabled }}
+      disabled={retryDisabled}
+      style={[styles.retryCta, retryDisabled && styles.disabled]}
+      onPress={() => void retrySummary()}
+    >
+      <Text style={styles.retryText}>
+        {retryPending
+          ? "요청 중…"
+          : retryWait > 0
+            ? `${retryWait >= 60 ? `${Math.ceil(retryWait / 60)}분` : `${retryWait}초`} 후 다시 생성`
+            : "요약 다시 생성"}
+      </Text>
+    </Pressable>
+  );
+
   return (
     <View style={styles.root}>
-      <View style={styles.appbar}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="뒤로가기"
-          style={styles.iconButton}
-          onPress={onBack}
-        >
-          <Ionicons name="arrow-back" size={22} color={colors.inkSoft} />
-        </Pressable>
-        <Text style={styles.brand}>Unwind</Text>
-        <View style={styles.spacer} />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="더보기"
-          style={styles.iconButton}
-          onPress={more}
-        >
-          <Ionicons
-            name="ellipsis-horizontal"
-            size={23}
-            color={colors.inkSoft}
-          />
-        </Pressable>
-      </View>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
+      <View
+        style={styles.screen}
+        accessibilityElementsHidden={menuOpen}
+        importantForAccessibility={menuOpen ? "no-hide-descendants" : "auto"}
       >
-        <Text style={styles.metaLine}>
-          Threads · {thread.savedDateLabel} 저장
-        </Text>
-        {presentation !== "ready" ? (
-          <Text numberOfLines={3} style={styles.title}>
-            {meta?.title?.trim() || thread.title || "제목 없음"}
-          </Text>
-        ) : null}
-        <View
-          style={
-            presentation === "ready" ? styles.summaryDocument : styles.card
-          }
-        >
-          <View style={styles.summaryHeader}>
-            <Ionicons
-              name="sparkles-outline"
-              size={20}
-              color={colors.primary}
-            />
-            <Text style={styles.summaryHeaderText}>AI 요약</Text>
-            <View style={styles.spacer} />
-            {presentation === "ready" ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={
-                  copyState === "copied" ? "복사됨" : "요약 복사"
-                }
-                style={styles.copyButton}
-                onPress={() => void copy()}
-              >
-                <Text style={styles.copyText}>
-                  {copyState === "copied"
-                    ? "✓ 복사됨"
-                    : copyState === "copying"
-                      ? "복사 중"
-                      : copyState === "failed"
-                        ? "다시 복사"
-                        : "복사"}
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
-          {presentation === "summarizing" ? (
-            <Text style={styles.loadingSummary}>
-              요약을 생성하는 중입니다…
-            </Text>
-          ) : presentation === "failed" ? (
-            <View style={styles.stateBlock}>
-              <Text accessibilityRole="header" style={styles.stateTitle}>
-                요약을 생성하지 못했어요
-              </Text>
-              <Text style={styles.stateDescription}>
-                {thread.lastSummaryError ||
-                  "잠시 후 다시 생성해 주세요."}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="요약 다시 생성"
-                accessibilityState={{ disabled: retryPending }}
-                disabled={retryPending}
-                style={styles.retryCta}
-                onPress={() => void retrySummary()}
-              >
-                <Text style={styles.retryCtaText}>
-                  {retryPending ? "요청 중…" : "요약 다시 생성"}
-                </Text>
-              </Pressable>
-            </View>
-          ) : presentation === "missing" ? (
-            <View style={styles.stateBlock}>
-              <Text accessibilityRole="header" style={styles.stateTitle}>
-                요약이 필요해요
-              </Text>
-              <Text style={styles.stateDescription}>
-                저장한 글의 핵심을 읽기 좋은 문단과 강조로 정리해 드립니다.
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="요약 생성"
-                accessibilityState={{ disabled: retryPending }}
-                disabled={retryPending}
-                style={styles.retryCta}
-                onPress={() => void retrySummary()}
-              >
-                <Text style={styles.retryCtaText}>
-                  {retryPending ? "요청 중…" : "요약 생성"}
-                </Text>
-              </Pressable>
-            </View>
-          ) : summaryMarkdown ? (
-            <MarkdownSummary markdown={summaryMarkdown} />
-          ) : null}
-          {originalUrl ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="원문 보기"
-              style={styles.primaryCta}
-              onPress={() => void openOriginal()}
-            >
-              <Text style={styles.primaryCtaText}>원문 보기</Text>
-              <Ionicons name="open-outline" size={18} color={colors.surface} />
-            </Pressable>
-          ) : (
-            <Text style={styles.disabledCta}>원문 링크가 없습니다.</Text>
-          )}
-        </View>
-        {presentation === "ready" &&
-        thread.processStatus === "CONTEXT_INSUFFICIENT" ? (
-          <Text style={styles.notice}>일부 원문이 누락되었을 수 있습니다.</Text>
-        ) : null}
-        {presentation === "ready" && thread.tags.length ? (
-          <View style={styles.tags}>
-            {thread.tags.slice(0, 3).map((tag) => (
-              <Text key={tag} style={styles.tag}>
-                #{tag}
-              </Text>
-            ))}
-          </View>
-        ) : null}
-        {presentation === "ready" && meta ? (
-          <CollapsibleSection
-            title="분석 정보"
-            children={[`맥락 상태: ${meta.contextStatus}`, meta.caution]
-              .filter(Boolean)
-              .join("\n\n")}
-          />
-        ) : null}
-        {showSource ? (
-          <View style={styles.source}>
-            <Text style={styles.sectionTitle}>요약에 사용된 원문</Text>
-            <Text selectable style={styles.body}>
-              {thread.rawText || "저장된 원문이 없습니다."}
-            </Text>
-          </View>
-        ) : null}
-        <Modal
-          visible={menuOpen}
-          transparent
-          animationType="fade"
-          accessibilityViewIsModal
-          onRequestClose={() => setMenuOpen(false)}
-        >
+        <View style={styles.appbar}>
           <Pressable
-            style={styles.menuBackdrop}
-            onPress={() => setMenuOpen(false)}
+            accessibilityRole="button"
+            accessibilityLabel="뒤로가기"
+            style={styles.iconButton}
+            onPress={onBack}
           >
-            <View
-              ref={menuRef}
-              accessible
-              accessibilityLabel="더보기 메뉴"
-              style={styles.menu}
-            >
-              <Text style={styles.menuTitle}>더보기</Text>
+            <Ionicons name="arrow-back" size={22} color={colors.ink} />
+          </Pressable>
+          <Text style={styles.brand}>Unwind</Text>
+          <View style={styles.spacer} />
+          <Pressable
+            ref={menuTriggerRef}
+            accessibilityRole="button"
+            accessibilityLabel="더보기"
+            accessibilityState={{ expanded: menuOpen }}
+            style={styles.iconButton}
+            onPress={() => setMenuOpen(true)}
+          >
+            <Ionicons name="ellipsis-horizontal" size={23} color={colors.ink} />
+          </Pressable>
+        </View>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.metaLine}>
+            Threads · {thread.savedDateLabel} 저장
+          </Text>
+          {detailError ? (
+            <View style={styles.notice} accessibilityLiveRegion="polite">
+              <Text style={styles.noticeText}>
+                최신 정보를 불러오지 못했어요. 마지막으로 확인한 내용을
+                표시합니다.
+              </Text>
+              {onRefresh ? (
+                <Pressable
+                  accessibilityRole="button"
+                  style={styles.textAction}
+                  onPress={onRefresh}
+                >
+                  <Text style={styles.copyText}>다시 불러오기</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+          {summaryMarkdown && (processing || failed || thread.documentStale) ? (
+            <View style={styles.notice} accessibilityLiveRegion="polite">
+              <Text style={styles.noticeTitle}>
+                {failed
+                  ? "요약을 갱신하지 못했어요"
+                  : processing
+                    ? "새 요약을 만들고 있어요"
+                    : "새 요약을 불러오는 중이에요"}
+              </Text>
+              <Text style={styles.noticeText}>
+                마지막으로 확인한 요약을 표시하고 있어요.
+                {failed
+                  ? ` ${getSummaryErrorMessage(thread.errorCode)}`
+                  : " 새 요약을 받으면 바뀝니다."}
+              </Text>
+              {failed ? retryAction : null}
+            </View>
+          ) : null}
+          {partial ? (
+            <View style={styles.notice} accessibilityLiveRegion="polite">
+              <Text style={styles.noticeTitle}>
+                일부 원문으로 만든 요약이에요
+              </Text>
+              <Text style={styles.noticeText}>
+                이어지는 글이 빠졌을 수 있어요. 전체 맥락은 원문에서 확인해
+                주세요.
+              </Text>
+            </View>
+          ) : null}
+          {summaryMarkdown ? (
+            <MarkdownSummary
+              key={thread.id}
+              markdown={summaryMarkdown}
+              titleFallback={title}
+              afterIntro={actions}
+            />
+          ) : (
+            <View>
+              <Text accessibilityRole="header" style={styles.title}>
+                {title}
+              </Text>
+              <View style={styles.stateBlock} accessibilityLiveRegion="polite">
+                {loadingDetail ? (
+                  <>
+                    <ActivityIndicator color={colors.primary} />
+                    <Text style={styles.body}>
+                      저장한 글을 불러오는 중이에요.
+                    </Text>
+                  </>
+                ) : detailError ? (
+                  <Text style={styles.body}>
+                    요약을 불러오지 못했어요. 다시 불러오면 생성 상태를 확인할
+                    수 있습니다.
+                  </Text>
+                ) : presentation === "summarizing" ? (
+                  <>
+                    <ActivityIndicator color={colors.primary} />
+                    <Text accessibilityRole="header" style={styles.stateTitle}>
+                      요약을 준비하고 있어요
+                    </Text>
+                    <Text style={styles.body}>
+                      원문을 확인하고 읽기 좋은 요약을 만들고 있어요. 완성되면
+                      자동으로 표시됩니다.
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text accessibilityRole="header" style={styles.stateTitle}>
+                      {presentation === "failed"
+                        ? "요약을 만들지 못했어요"
+                        : "아직 요약이 없어요"}
+                    </Text>
+                    <Text style={styles.body}>
+                      {presentation === "failed"
+                        ? getSummaryErrorMessage(thread.errorCode)
+                        : "저장한 글을 요약하면 핵심을 빠르게 다시 확인할 수 있어요."}
+                    </Text>
+                    {retryAction}
+                  </>
+                )}
+              </View>
+              {actions}
+            </View>
+          )}
+          {summaryMarkdown && thread.tags.length ? (
+            <View style={styles.tags}>
+              {thread.tags.slice(0, 3).map((tag) => (
+                <Text key={tag} style={styles.tag}>
+                  #{tag}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+          {knownSource ? (
+            <View style={styles.sourceInfo}>
               <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ expanded: sourceInfoOpen }}
+                accessibilityLabel="원문 수집 정보"
+                style={styles.collapseTrigger}
+                onPress={() => setSourceInfoOpen((value) => !value)}
+              >
+                <Text style={styles.metaLine}>원문 수집 정보</Text>
+                <Ionicons
+                  name={sourceInfoOpen ? "chevron-up" : "chevron-down"}
+                  size={18}
+                  color={colors.muted}
+                />
+              </Pressable>
+              {sourceInfoOpen ? (
+                <Text style={styles.noticeText}>
+                  {partial
+                    ? "이어지는 원문 일부가 수집되지 않았습니다."
+                    : "확인된 원문이 모두 수집되었습니다."}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+          {showSource ? (
+            <View style={styles.sourceInfo}>
+              <Text accessibilityRole="header" style={styles.stateTitle}>
+                요약에 사용된 원문
+              </Text>
+              <Text selectable style={styles.body}>
+                {thread.rawText || "저장된 원문이 없습니다."}
+              </Text>
+            </View>
+          ) : null}
+        </ScrollView>
+      </View>
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="none"
+        onRequestClose={() => setMenuOpen(false)}
+      >
+        <View style={styles.menuBackdrop}>
+          <Pressable
+            accessible={false}
+            importantForAccessibility="no"
+            style={StyleSheet.absoluteFill}
+            onPress={() => setMenuOpen(false)}
+          />
+          <View
+            accessibilityViewIsModal
+            style={[
+              styles.menu,
+              { paddingBottom: Math.max(insets.bottom, spacing.md) },
+            ]}
+          >
+            <View style={styles.menuHeader}>
+              <Text accessibilityRole="header" style={styles.stateTitle}>
+                글 관리
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="더보기 닫기"
+                style={styles.iconButton}
+                onPress={() => setMenuOpen(false)}
+              >
+                <Ionicons name="close" size={22} color={colors.ink} />
+              </Pressable>
+            </View>
+            <ScrollView>
+              <Pressable
+                ref={menuFirstItemRef}
+                accessibilityRole="button"
                 style={styles.menuItem}
-                onPress={() => choose(() => onToggleReadStatus(thread))}
+                onPress={() => choose(() => markManually(onToggleReadStatus))}
               >
                 <Text style={styles.menuText}>
                   {thread.readStatus === "READ" ? "안 읽음 표시" : "읽음 표시"}
                 </Text>
               </Pressable>
               <Pressable
+                accessibilityRole="button"
                 style={styles.menuItem}
-                onPress={() => choose(() => onMarkReadLater(thread))}
+                onPress={() => choose(() => markManually(onMarkReadLater))}
               >
                 <Text style={styles.menuText}>나중에 보기</Text>
               </Pressable>
+              {summaryMarkdown ? (
+                <Pressable
+                  accessibilityRole="button"
+                  style={styles.menuItem}
+                  onPress={() => choose(() => onShareSummary(thread))}
+                >
+                  <Text style={styles.menuText}>요약 공유</Text>
+                </Pressable>
+              ) : null}
               <Pressable
+                accessibilityRole="button"
                 style={styles.menuItem}
                 onPress={() => choose(() => setShowSource((value) => !value))}
               >
@@ -379,182 +536,187 @@ export function ThreadDetailScreen({
                   {showSource ? "원문 소스 닫기" : "원문 소스 보기"}
                 </Text>
               </Pressable>
-              {presentation === "ready" ? (
-                <Pressable
-                  style={styles.menuItem}
-                  onPress={() => choose(() => onShareSummary(thread))}
-                >
-                  <Text style={styles.menuText}>공유</Text>
-                </Pressable>
-              ) : null}
-              {canRetry ? (
-                <Pressable
-                  style={styles.menuItem}
-                  accessibilityState={{ disabled: retryPending }}
-                  disabled={retryPending}
-                  onPress={() => choose(() => void retrySummary())}
-                >
-                  <Text style={styles.menuText}>
-                    {retryPending ? "요약 요청 중…" : "요약 재시도"}
-                  </Text>
-                </Pressable>
-              ) : null}
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="요약 다시 생성"
+                accessibilityState={{ disabled: retryDisabled }}
+                disabled={retryDisabled}
+                style={[styles.menuItem, retryDisabled && styles.disabled]}
+                onPress={() => choose(() => void retrySummary())}
+              >
+                <Text style={styles.menuText}>
+                  {processing
+                    ? "새 요약 생성 중"
+                    : retryPending
+                      ? "요약 요청 중…"
+                      : retryWait > 0
+                        ? "잠시 후 다시 생성"
+                        : "요약 다시 생성"}
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
                 style={styles.menuDelete}
                 onPress={() => choose(() => onDelete(thread))}
               >
                 <Text style={styles.deleteText}>삭제</Text>
               </Pressable>
-            </View>
-          </Pressable>
-        </Modal>
-      </ScrollView>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  summaryDocument: { paddingBottom: spacing.md },
-  root: { flex: 1, backgroundColor: colors.canvas },
+  root: { flex: 1, backgroundColor: colors.surface },
+  screen: { flex: 1 },
   appbar: {
-    height: 56,
+    minHeight: 56,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: spacing.sm,
-    backgroundColor: colors.paper,
     borderBottomWidth: 1,
     borderBottomColor: colors.hairline,
   },
   iconButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  brand: { color: colors.primary, fontSize: 22, fontWeight: "800" },
-  spacer: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.xl },
-  metaLine: { color: colors.muted, fontSize: 13, marginBottom: spacing.sm },
-  title: {
-    color: colors.ink,
-    fontSize: 29,
-    lineHeight: 37,
-    fontWeight: "700",
-    letterSpacing: -0.6,
-    marginBottom: spacing.lg,
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.hairline,
-  },
-  summaryHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: spacing.lg,
-  },
-  summaryHeaderText: {
-    color: colors.primary,
-    fontSize: 18,
-    fontWeight: "800",
-    marginLeft: spacing.sm,
-  },
-  copyButton: {
     minWidth: 44,
     minHeight: 44,
-    justifyContent: "center",
     alignItems: "center",
+    justifyContent: "center",
   },
-  copyText: { color: colors.primary, fontWeight: "800" },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 16,
-    lineHeight: 23,
-    fontWeight: "800",
-    marginBottom: spacing.xs,
-  },
-  body: { flex: 1, color: colors.ink, fontSize: 15, lineHeight: 24 },
-  stateBlock: { gap: spacing.sm },
-  stateTitle: {
-    color: colors.ink,
+  brand: {
+    color: colors.primary,
     fontSize: 18,
-    lineHeight: 26,
-    fontWeight: "800",
+    fontWeight: "700",
+    flexShrink: 1,
   },
-  stateDescription: { color: colors.inkSoft, fontSize: 15, lineHeight: 23 },
-  retryCta: {
-    minHeight: 48,
-    borderRadius: radius.md,
-    backgroundColor: colors.blueSoft,
+  spacer: { flex: 1 },
+  content: {
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
+    maxWidth: 720,
+    width: "100%",
+    alignSelf: "center",
+  },
+  metaLine: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 20,
+    marginBottom: spacing.sm,
+  },
+  title: {
+    color: colors.ink,
+    fontSize: 26,
+    lineHeight: 34,
+    fontWeight: "700",
+    letterSpacing: -0.5,
+    marginBottom: spacing.md,
+    flexShrink: 1,
+  },
+  body: { color: colors.inkSoft, fontSize: 16, lineHeight: 27, flexShrink: 1 },
+  actions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
     alignItems: "center",
-    justifyContent: "center",
     marginTop: spacing.sm,
+    marginBottom: spacing.lg,
   },
-  retryCtaText: { color: colors.primary, fontSize: 15, fontWeight: "800" },
   primaryCta: {
     minHeight: 48,
-    borderRadius: radius.pill,
+    flexGrow: 1,
+    borderRadius: radius.md,
     backgroundColor: colors.primary,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
     gap: spacing.sm,
-    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
-  primaryCtaText: { color: colors.surface, fontSize: 15, fontWeight: "800" },
-  disabledCta: {
-    color: colors.muted,
-    textAlign: "center",
-    marginTop: spacing.md,
+  primaryCtaText: {
+    color: colors.surface,
+    fontSize: 16,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  copyButton: {
+    minWidth: 64,
+    minHeight: 48,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  copyText: { color: colors.primary, fontSize: 15, fontWeight: "600" },
+  stateBlock: {
+    backgroundColor: colors.surfaceLow,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+    marginVertical: spacing.md,
+  },
+  stateTitle: {
+    color: colors.ink,
+    fontSize: 18,
+    lineHeight: 26,
+    fontWeight: "700",
+    flexShrink: 1,
   },
   notice: {
-    color: colors.inkSoft,
-    backgroundColor: colors.surfaceMid,
-    padding: spacing.md,
+    backgroundColor: colors.surfaceLow,
     borderRadius: radius.md,
-    marginTop: spacing.md,
-    lineHeight: 21,
-  },
-  loadingSummary: {
-    color: colors.muted,
-    fontSize: 16,
-    lineHeight: 25,
-    paddingVertical: spacing.md,
-  },
-  collapsible: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
     padding: spacing.md,
-    marginTop: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.hairline,
+    marginBottom: spacing.md,
+    gap: spacing.xs,
   },
+  noticeTitle: {
+    color: colors.ink,
+    fontSize: 15,
+    lineHeight: 23,
+    fontWeight: "700",
+  },
+  noticeText: { color: colors.inkSoft, fontSize: 14, lineHeight: 23 },
+  retryCta: {
+    minHeight: 48,
+    paddingVertical: spacing.sm,
+    justifyContent: "center",
+    alignItems: "flex-start",
+  },
+  retryText: {
+    color: colors.primary,
+    fontSize: 15,
+    lineHeight: 23,
+    fontWeight: "600",
+  },
+  textAction: {
+    minHeight: 44,
+    justifyContent: "center",
+    alignItems: "flex-start",
+  },
+  disabled: { opacity: 0.6 },
+  sourceInfo: {
+    borderTopWidth: 1,
+    borderTopColor: colors.hairline,
+    paddingTop: spacing.md,
+    marginTop: spacing.lg,
+    gap: spacing.sm,
+  },
+  tags: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+    marginTop: spacing.md,
+  },
+  tag: { color: colors.muted, fontSize: 13, lineHeight: 20 },
   collapseTrigger: {
     minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
-  },
-  tags: {
-    flexDirection: "row",
+    justifyContent: "space-between",
     gap: spacing.sm,
-    flexWrap: "wrap",
-    marginTop: spacing.lg,
-  },
-  tag: {
-    color: colors.muted,
-    borderWidth: 1,
-    borderColor: colors.hairline,
-    borderRadius: radius.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  source: {
-    backgroundColor: colors.surface,
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    marginTop: spacing.md,
   },
   menuBackdrop: {
     flex: 1,
@@ -566,21 +728,33 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
+    maxHeight: "85%",
   },
-  menuTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: "800",
+  menuHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: spacing.sm,
+    gap: spacing.sm,
   },
-  menuItem: { minHeight: 48, justifyContent: "center" },
-  menuText: { color: colors.ink, fontSize: 16 },
+  menuItem: {
+    minHeight: 48,
+    paddingVertical: spacing.sm,
+    justifyContent: "center",
+  },
+  menuText: { color: colors.ink, fontSize: 16, lineHeight: 26 },
   menuDelete: {
     minHeight: 48,
+    paddingVertical: spacing.sm,
     justifyContent: "center",
     borderTopWidth: 1,
     borderTopColor: colors.hairline,
     marginTop: spacing.sm,
   },
-  deleteText: { color: colors.red, fontSize: 16, fontWeight: "800" },
+  deleteText: {
+    color: colors.red,
+    fontSize: 16,
+    lineHeight: 26,
+    fontWeight: "700",
+  },
 });
