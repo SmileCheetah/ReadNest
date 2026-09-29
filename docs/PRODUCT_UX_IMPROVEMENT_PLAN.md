@@ -8,6 +8,10 @@
 
 ## 1. 문서 우선순위와 제품 목표
 
+### 2026-09-30 추가 우선 과제: 요약 지연
+
+**P1 / 조사·해결 예정:** 실제 Luna 직접 호출에서 원문 수집 1.55초, AI 응답 8.26초, 합계 9.81초를 측정했다(1회, 앱·큐·DB·화면 시간 제외). [요약 지연 현황과 우선 개선 계획](SUMMARY_LATENCY_INVESTIGATION.md)에 측정 한계, 추정 원인, 해결 후보, 기대 효과와 검증 순서를 기록했다. 문서화만 완료했으며 성능 개선 코드는 미구현이다. 다음 성능·UX 작업은 전체 경로 계측과 품질에 영향 없는 대기 제거를 우선한다.
+
 현재 제품 방향·작업 우선순위는 이 문서, 단일 Markdown 요약의 현행 계약은 [RICH_MARKDOWN_SUMMARY_PLAN.md](RICH_MARKDOWN_SUMMARY_PLAN.md)를 기준으로 한다. 이 문서의 **제안**은 구현 완료나 배포 완료를 뜻하지 않는다. 구현 시 해당 작업의 계약·테스트·검증 커밋을 갱신한다.
 
 기존 `WORKING_NOTES`, `SUMMARY_DETAIL_UI_IMPLEMENTATION_PLAN`, `ROADMAP_AND_RELEASE_CRITERIA`, `WORK_STATUS_SUMMARY`, `REMAINING_WORK`, `MVP_PLAN`, `THREAD_COLLECTION_PLAN`은 과거 설계·이력이다. 그 안의 V1 fallback, 3개 포인트 고정, Gemini, 웹 프론트 지침을 현재 구현에 재도입하지 않는다.
