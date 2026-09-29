@@ -230,6 +230,13 @@ function articleParams(options: ListArticlesOptions) {
 }
 
 export const readnestApi = {
+  guest(input: { deviceId: string }) {
+    return request<AuthResponse>("/auth/guest", {
+      method: "POST",
+      body: input,
+    });
+  },
+
   signup(input: { email: string; password: string; nickname: string }) {
     return request<AuthResponse>("/auth/signup", {
       method: "POST",

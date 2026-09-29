@@ -1,12 +1,16 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { createHmac, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { GuestSessionDto } from './dto/guest-session.dto';
 import { LoginDto } from './dto/login.dto';
 import { SignupDto } from './dto/signup.dto';
 import { AuthResponse } from './types/auth-response';
@@ -17,6 +21,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
   ) {}
 
   async signup(dto: SignupDto): Promise<AuthResponse> {
@@ -67,6 +72,42 @@ export class AuthService {
         '이메일 또는 비밀번호가 올바르지 않습니다.',
       );
     }
+
+    return this.createAuthResponse(user);
+  }
+
+  async guest(dto: GuestSessionDto): Promise<AuthResponse> {
+    const environment =
+      this.configService.get<string>('NODE_ENV') ?? 'development';
+    const explicitlyDisabled =
+      this.configService.get<string>('GUEST_AUTH_ENABLED') === 'false';
+    if (environment === 'production' || explicitlyDisabled) {
+      throw new ForbiddenException(
+        '개발용 게스트 로그인이 비활성화되어 있습니다.',
+      );
+    }
+
+    const identity = createHmac(
+      'sha256',
+      this.configService.getOrThrow<string>('JWT_SECRET'),
+    )
+      .update(dto.deviceId)
+      .digest('hex');
+    const email = `guest-${identity.slice(0, 40)}@guest.unwind.local`;
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+
+    if (existing) return this.createAuthResponse(existing);
+
+    const passwordHash = await bcrypt.hash(randomUUID(), 12);
+    const user = await this.prisma.user.upsert({
+      where: { email },
+      update: {},
+      create: {
+        email,
+        passwordHash,
+        nickname: '게스트',
+      },
+    });
 
     return this.createAuthResponse(user);
   }

@@ -55,6 +55,7 @@ try {
     calls.push(`${request.method()} ${apiPath}`);
     const fulfill = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' }, body: JSON.stringify(body) });
     if (request.method() === 'OPTIONS') return fulfill({});
+    if (apiPath === '/auth/guest') return fulfill({ accessToken: 'synthetic-qa-token', user }, 201);
     if (apiPath === '/auth/login') return fulfill({ accessToken: 'synthetic-qa-token', user }, 201);
     if (apiPath === '/auth/me') return fulfill(user);
     const match = apiPath.match(/^\/articles\/([^/]+)(.*)$/);
@@ -78,10 +79,8 @@ try {
     return fulfill({ message: 'Unexpected synthetic QA route' }, 404);
   });
   await page.goto(url);
-  await page.getByPlaceholder('이메일').fill(user.email);
-  await page.getByPlaceholder('비밀번호').fill('Synthetic-password-only');
-  await page.getByRole('button', { name: '로그인', exact: true }).click();
   await page.getByText('AI 시대의 개발자는 판단한다', { exact: true }).first().waitFor();
+  assert.equal(await page.getByPlaceholder('이메일').count(), 0, 'Development guest mode skips the login form');
   assert.equal(await page.getByRole('button', { name: '링크 저장 입력 닫기', exact: true }).count(), 0, 'Existing users start with the capture panel closed');
   await page.screenshot({ path: path.join(output, 'home-390.png'), fullPage: true });
   await page.getByText('AI 시대의 개발자는 판단한다', { exact: true }).first().click();

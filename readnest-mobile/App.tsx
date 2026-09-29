@@ -19,7 +19,9 @@ import { StatusBar } from "expo-status-bar";
 import * as ExpoLinking from "expo-linking";
 import { Ionicons } from "@expo/vector-icons";
 import { ApiError, ApiUser, readnestApi } from "./src/api/readnestApi";
+import { guestIdentityStorage } from "./src/api/guestIdentityStorage";
 import { tokenStorage } from "./src/api/tokenStorage";
+import { guestModeEnabled } from "./src/config/authMode";
 import { useArticleLibrary } from "./src/hooks/useArticleLibrary";
 import { isProcessing } from "./src/hooks/articleState";
 import { AppHeader } from "./src/components/AppHeader";
@@ -79,22 +81,40 @@ export default function App() {
     setSessionError(null);
     try {
       const storedToken = await tokenStorage.get();
-      if (!storedToken) return;
-      const me = await readnestApi.me(storedToken);
+      if (storedToken) {
+        try {
+          const me = await readnestApi.me(storedToken);
+          if (generation !== authGeneration.current) return;
+          setAccessToken(storedToken);
+          setUser(me);
+          return;
+        } catch (error) {
+          if (generation !== authGeneration.current) return;
+          if (
+            error instanceof ApiError &&
+            (error.status === 401 || error.status === 403)
+          ) {
+            await tokenStorage.clear();
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      if (!guestModeEnabled) return;
+      const deviceId = await guestIdentityStorage.getOrCreate();
+      const guestSession = await readnestApi.guest({ deviceId });
       if (generation !== authGeneration.current) return;
-      setAccessToken(storedToken);
-      setUser(me);
+      await tokenStorage.set(guestSession.accessToken);
+      setAccessToken(guestSession.accessToken);
+      setUser(guestSession.user);
     } catch (error) {
       if (generation !== authGeneration.current) return;
-      if (
-        error instanceof ApiError &&
-        (error.status === 401 || error.status === 403)
-      ) {
-        await tokenStorage.clear();
-      } else
-        setSessionError(
-          "연결을 확인하지 못했어요. 로그인 정보는 안전하게 보관되어 있습니다.",
-        );
+      setSessionError(
+        guestModeEnabled
+          ? "게스트 세션을 준비하지 못했어요. API 서버 연결을 확인해 주세요."
+          : "연결을 확인하지 못했어요. 로그인 정보는 안전하게 보관되어 있습니다.",
+      );
     } finally {
       if (generation === authGeneration.current) setIsRestoringSession(false);
     }
@@ -251,7 +271,7 @@ export default function App() {
         <StatusBar style="dark" />
         {isRestoringSession ? (
           <View style={styles.authRoot}>
-            <Text style={styles.loadingText}>로그인 상태를 확인하는 중…</Text>
+            <Text style={styles.loadingText}>앱을 준비하는 중…</Text>
           </View>
         ) : sessionError ? (
           <View style={styles.authRoot}>
@@ -268,7 +288,22 @@ export default function App() {
             </Pressable>
           </View>
         ) : !accessToken || !user ? (
-          <AuthScreen onAuthSuccess={handleAuthSuccess} />
+          guestModeEnabled ? (
+            <View style={styles.authRoot}>
+              <Text accessibilityRole="header" style={styles.authTitle}>
+                앱을 준비하지 못했어요
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                style={styles.primaryButton}
+                onPress={() => void restoreSession()}
+              >
+                <Text style={styles.primaryButtonText}>다시 연결</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <AuthScreen onAuthSuccess={handleAuthSuccess} />
+          )
         ) : (
           <View style={styles.app}>
             <View
@@ -325,6 +360,7 @@ export default function App() {
                   ) : (
                     <SettingsScreen
                       user={user}
+                      guestMode={guestModeEnabled}
                       onLogout={() => void logout()}
                     />
                   )}
@@ -965,9 +1001,11 @@ function ArchiveScreen({
 }
 function SettingsScreen({
   user,
+  guestMode,
   onLogout,
 }: {
   user: ApiUser;
+  guestMode: boolean;
   onLogout: () => void;
 }) {
   return (
@@ -976,7 +1014,11 @@ function SettingsScreen({
         설정
       </Text>
       <View style={styles.settingsCard}>
-        <SettingRow label="계정" value={user.email} icon="person-outline" />
+        <SettingRow
+          label="계정"
+          value={guestMode ? "이 기기 전용 게스트" : user.email}
+          icon="person-outline"
+        />
         <SettingRow
           label="닉네임"
           value={user.nickname}
@@ -985,13 +1027,20 @@ function SettingsScreen({
         <SettingRow label="요약 언어" value="한국어" icon="language-outline" />
         <SettingRow label="저장 대상" value="Threads only" icon="at-outline" />
       </View>
-      <Pressable
-        accessibilityRole="button"
-        style={styles.logoutButton}
-        onPress={onLogout}
-      >
-        <Text style={styles.logoutText}>로그아웃</Text>
-      </Pressable>
+      {guestMode ? (
+        <Text style={styles.guestNotice}>
+          개발용 게스트 데이터는 이 기기에 연결됩니다. 앱을 삭제하면 다시
+          접근하지 못할 수 있어요.
+        </Text>
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          style={styles.logoutButton}
+          onPress={onLogout}
+        >
+          <Text style={styles.logoutText}>로그아웃</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -1439,5 +1488,10 @@ const styles = StyleSheet.create({
     color: colors.red,
     fontSize: 14,
     fontWeight: "800",
+  },
+  guestNotice: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 20,
   },
 });

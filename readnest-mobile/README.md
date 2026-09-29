@@ -15,7 +15,8 @@ Expo Go 앱으로 QR 코드를 스캔하면 모바일에서 확인할 수 있습
 
 ## 화면
 
-- 로그인 / 회원가입
+- 개발 빌드: 기기별 자동 게스트 세션
+- 운영 빌드: 로그인 / 회원가입
 - 홈: Threads URL 저장, 오늘 저장글, 요약 중, 안 읽음 목록
 - 아카이브: 기간 탭, 검색, 저장된 Thread 목록
 - 상세: AI 요약, 주요 포인트, 태그, 원본 링크 버튼, 연속 Thread 감지 상태
@@ -45,13 +46,14 @@ cp .env.example .env.local
 
 ```env
 EXPO_PUBLIC_API_BASE_URL=http://192.168.0.4:3000/api
+EXPO_PUBLIC_GUEST_MODE=true
 ```
 
 먼저 API 서버를 실행합니다.
 
 ```bash
 cd ../readnest-api
-npm run start
+npm run start:dev
 ```
 
 그 다음 모바일 앱을 실행합니다.
@@ -61,7 +63,17 @@ cd ../readnest-mobile
 npm run start -- --clear
 ```
 
-## 로그인 유지
+## 개발용 게스트 모드와 로그인 유지
+
+개발 빌드는 기본적으로 로그인 화면을 건너뛰고 기기별 게스트 계정을 자동으로 연결합니다. Backend는 `NODE_ENV=development`여야 하며 `GUEST_AUTH_ENABLED=false`로 명시하면 게스트 endpoint를 끌 수 있습니다.
+
+게스트 기기 식별키는 Android/iOS에서 `expo-secure-store`에 저장되고 원본 값은 Backend DB에 저장되지 않습니다. 앱을 삭제하면 식별키도 사라져 기존 게스트 데이터에 다시 접근하지 못할 수 있습니다. Web 미리보기에서는 현재 탭의 `sessionStorage`에만 유지됩니다.
+
+로그인 화면을 직접 테스트하려면 다음과 같이 설정합니다.
+
+```env
+EXPO_PUBLIC_GUEST_MODE=false
+```
 
 로그인 성공 시 access token을 `expo-secure-store`에 저장합니다.
 

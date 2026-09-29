@@ -222,6 +222,15 @@ PLAYWRIGHT_SCROLL_COUNT=3
 EXTRACT_TEXT_LIMIT=50000
 ```
 
+개발 환경에서는 로그인 화면 없이 앱을 확인할 수 있도록 기기별 게스트 세션을 사용할 수 있습니다.
+
+```env
+NODE_ENV="development"
+GUEST_AUTH_ENABLED=true
+```
+
+`POST /api/auth/guest`는 무작위 기기 식별키로 분리된 익명 사용자와 JWT를 발급합니다. 원본 식별키는 DB에 저장하지 않으며, `NODE_ENV=production`에서는 `GUEST_AUTH_ENABLED` 값과 관계없이 항상 거부합니다. 기존 로그인·회원가입과 JWT 보호 API는 그대로 유지됩니다.
+
 요약 결과 구조:
 
 - `summary`: 상세 화면 표시용 구조화 텍스트
@@ -262,6 +271,7 @@ NODE_ENV=production
 PORT=3000
 JWT_SECRET=
 JWT_EXPIRES_IN=7d
+GUEST_AUTH_ENABLED=false
 DB_HOST=
 DB_PORT=3306
 DB_NAME=
