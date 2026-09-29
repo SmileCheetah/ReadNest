@@ -113,6 +113,31 @@ describe('AiSummaryService', () => {
     expect(prompt).toMatch(/다음 글을 요약해줘\.\n\n테스트 원문$/);
   });
 
+  it('changes explanation depth without imposing a fixed item count', () => {
+    const concise = buildSummaryPrompt('같은 수집 원문', 'CONCISE');
+    const detailed = buildSummaryPrompt('같은 수집 원문', 'DETAILED');
+
+    expect(concise).toContain('읽기 밀도: 핵심만');
+    expect(concise).toContain('항목 수를 임의로 제한하지 않는다');
+    expect(detailed).toContain('읽기 밀도: 자세히');
+    expect(detailed).toContain('이미 만든 요약을 늘리지 말고');
+    expect(detailed).toContain('수집되지 않은 맥락은 추측하지 않는다');
+    expect(concise).toMatch(/다음 글을 요약해줘\.\n\n같은 수집 원문$/);
+    expect(detailed).toMatch(/다음 글을 요약해줘\.\n\n같은 수집 원문$/);
+    expect(concise).not.toContain('2~3개');
+    expect(detailed).not.toContain('2~3개');
+  });
+
+  it('sends the requested density to Luna while keeping the source input', async () => {
+    const service = createService('# 자세한 요약\n\n원문의 근거를 보존한다.');
+    await service.summarize({ ...input, density: 'DETAILED' });
+
+    expect(service.client.responses.create).toHaveBeenCalledWith({
+      model: 'gpt-5.6-luna',
+      input: buildSummaryPrompt(input.text, 'DETAILED'),
+    });
+  });
+
   it('rejects an empty or unsafe model response', async () => {
     await expect(createService('   ').summarize(input)).rejects.toBeInstanceOf(
       SummaryGenerationError,

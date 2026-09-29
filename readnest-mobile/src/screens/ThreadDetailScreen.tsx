@@ -16,7 +16,10 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
-import type { SavedThread } from "../data/mockThreads";
+import type {
+  SavedThread,
+  SummaryDensity,
+} from "../data/mockThreads";
 import { colors, radius, spacing } from "../theme/tokens";
 import {
   isSupportedMarkdown,
@@ -27,6 +30,7 @@ import {
   getSummaryErrorMessage,
   getSummaryPresentation,
 } from "../components/summary/summaryPresentation";
+import { SummaryDensityControl } from "../components/summary/SummaryDensityControl";
 
 type Props = {
   thread: SavedThread;
@@ -35,7 +39,11 @@ type Props = {
   onToggleReadStatus: (thread: SavedThread) => void;
   onMarkReadLater: (thread: SavedThread) => void;
   onRetrySummary: (thread: SavedThread) => void | Promise<void>;
-  onShareSummary: (thread: SavedThread) => void;
+  onRequestSummaryDensity: (
+    thread: SavedThread,
+    density: Exclude<SummaryDensity, "STANDARD">,
+  ) => void | Promise<void>;
+  onShareSummary: (thread: SavedThread, markdown: string) => void;
   onDelete: (thread: SavedThread) => void;
   loadingDetail?: boolean;
   detailError?: string | null;
@@ -59,6 +67,7 @@ export function ThreadDetailScreen({
   onToggleReadStatus,
   onMarkReadLater,
   onRetrySummary,
+  onRequestSummaryDensity,
   onShareSummary,
   onDelete,
   loadingDetail = false,
@@ -73,6 +82,15 @@ export function ThreadDetailScreen({
   >("idle");
   const [menuOpen, setMenuOpen] = useState(false);
   const [retryPending, setRetryPending] = useState(false);
+  const [selectedDensity, setSelectedDensity] =
+    useState<SummaryDensity>("STANDARD");
+  const [densityRequestsPending, setDensityRequestsPending] = useState<
+    Array<Exclude<SummaryDensity, "STANDARD">>
+  >([]);
+  const [densityRequestErrors, setDensityRequestErrors] = useState<
+    Array<Exclude<SummaryDensity, "STANDARD">>
+  >([]);
+  const [densityRetryWait, setDensityRetryWait] = useState(0);
   const [retryWait, setRetryWait] = useState(
     Math.max(0, thread.retryAfterSeconds ?? 0),
   );
@@ -90,12 +108,41 @@ export function ThreadDetailScreen({
   });
   const meta = thread.summaryMeta;
   const originalUrl = thread.originalUrl?.trim();
-  const summaryMarkdown = isSupportedMarkdown(meta?.summaryMarkdown)
+  const standardSummaryMarkdown = isSupportedMarkdown(meta?.summaryMarkdown)
     ? meta.summaryMarkdown
     : null;
+  const selectedVariant =
+    selectedDensity === "STANDARD"
+      ? undefined
+      : thread.summaryVariants?.find(
+          (variant) =>
+            variant.density === selectedDensity &&
+            variant.sourceGeneration === thread.resultGeneration,
+        );
+  const variantMarkdown = isSupportedMarkdown(
+    selectedVariant?.summaryMarkdown,
+  )
+    ? selectedVariant.summaryMarkdown
+    : null;
+  const summaryMarkdown = variantMarkdown ?? standardSummaryMarkdown;
+  const densityBusy =
+    selectedDensity !== "STANDARD" &&
+    (densityRequestsPending.includes(selectedDensity) ||
+      selectedVariant?.state === "PENDING" ||
+      selectedVariant?.state === "RUNNING");
+  const densityFailed =
+    selectedDensity !== "STANDARD" &&
+    (densityRequestErrors.includes(selectedDensity) ||
+      selectedVariant?.state === "FAILED");
+  const densityRetryDisabled =
+    selectedDensity === "STANDARD" ||
+    densityRequestsPending.includes(selectedDensity) ||
+    densityRetryWait > 0 ||
+    (selectedVariant?.retryable === false &&
+      (selectedVariant.retryAfterSeconds ?? 0) === 0);
   const presentation = getSummaryPresentation(
     thread.processStatus,
-    !!summaryMarkdown,
+    !!standardSummaryMarkdown,
   );
   const processing =
     thread.processStatus === "SAVED" || thread.processStatus === "SUMMARIZING";
@@ -113,14 +160,14 @@ export function ThreadDetailScreen({
     thread.sourceCompleteness === "PARTIAL" ||
     thread.sourceCompleteness === "COMPLETE";
   const markdownTitle = useMemo(() => {
-    const firstSummaryBlock = summaryMarkdown
-      ? parseMarkdown(summaryMarkdown)[0]
+    const firstSummaryBlock = standardSummaryMarkdown
+      ? parseMarkdown(standardSummaryMarkdown)[0]
       : undefined;
     return firstSummaryBlock?.type === "heading" &&
       firstSummaryBlock.level === 1
       ? firstSummaryBlock.text?.trim()
       : undefined;
-  }, [summaryMarkdown]);
+  }, [standardSummaryMarkdown]);
   const title =
     markdownTitle || meta?.title?.trim() || thread.title || "저장한 글";
 
@@ -134,6 +181,9 @@ export function ThreadDetailScreen({
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
+    setSelectedDensity("STANDARD");
+    setDensityRequestsPending([]);
+    setDensityRequestErrors([]);
   }, [thread.id]);
 
   useEffect(() => {
@@ -173,6 +223,19 @@ export function ThreadDetailScreen({
     return () => clearInterval(timer);
   }, [thread.id, thread.generation, thread.retryAfterSeconds]);
 
+  useEffect(() => {
+    const seconds = Math.max(0, selectedVariant?.retryAfterSeconds ?? 0);
+    setDensityRetryWait(seconds);
+    if (!seconds) return;
+    const until = Date.now() + seconds * 1000;
+    const timer = setInterval(() => {
+      const left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+      setDensityRetryWait(left);
+      if (!left) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [selectedDensity, selectedVariant?.retryAfterSeconds]);
+
   const retrySummary = async () => {
     if (retryDisabled || retryBusy.current) return;
     retryBusy.current = true;
@@ -188,6 +251,42 @@ export function ThreadDetailScreen({
       retryBusy.current = false;
       setRetryPending(false);
     }
+  };
+  const requestDensity = async (
+    density: Exclude<SummaryDensity, "STANDARD">,
+  ) => {
+    if (densityRequestsPending.includes(density)) return;
+    setDensityRequestsPending((current) =>
+      current.includes(density) ? current : [...current, density],
+    );
+    setDensityRequestErrors((current) =>
+      current.filter((item) => item !== density),
+    );
+    try {
+      await onRequestSummaryDensity(thread, density);
+    } catch {
+      setDensityRequestErrors((current) =>
+        current.includes(density) ? current : [...current, density],
+      );
+    } finally {
+      setDensityRequestsPending((current) =>
+        current.filter((item) => item !== density),
+      );
+    }
+  };
+  const selectDensity = (density: SummaryDensity) => {
+    setSelectedDensity(density);
+    if (density !== "STANDARD")
+      setDensityRequestErrors((current) =>
+        current.filter((item) => item !== density),
+      );
+    if (density === "STANDARD") return;
+    const variant = thread.summaryVariants?.find(
+      (item) =>
+        item.density === density &&
+        item.sourceGeneration === thread.resultGeneration,
+    );
+    if (!variant) void requestDensity(density);
   };
   const copy = async () => {
     if (copyBusy.current || !summaryMarkdown) return;
@@ -387,7 +486,12 @@ export function ThreadDetailScreen({
             {title}
           </Text>
           <View style={styles.summaryCard}>
-            <View style={styles.summaryHeader}>
+            <View
+              style={[
+                styles.summaryHeader,
+                !standardSummaryMarkdown && styles.summaryHeaderStandalone,
+              ]}
+            >
               <View style={styles.summaryIdentity}>
                 <Ionicons
                   accessible={false}
@@ -402,9 +506,28 @@ export function ThreadDetailScreen({
               </View>
               {copyAction}
             </View>
+            {standardSummaryMarkdown ? (
+              <SummaryDensityControl
+                selected={selectedDensity}
+                busy={densityBusy}
+                failed={densityFailed}
+                partialSource={partial}
+                retryWait={densityRetryWait}
+                retryDisabled={densityRetryDisabled}
+                onSelect={selectDensity}
+                onRetry={() =>
+                  void requestDensity(
+                    selectedDensity as Exclude<
+                      SummaryDensity,
+                      "STANDARD"
+                    >,
+                  )
+                }
+              />
+            ) : null}
             {summaryMarkdown ? (
               <MarkdownSummary
-                key={thread.id}
+                key={`${thread.id}:${selectedDensity}:${selectedVariant?.generatedAt ?? "standard"}`}
                 markdown={summaryMarkdown}
                 titleFallback={title}
                 afterIntro={primaryAction}
@@ -452,7 +575,7 @@ export function ThreadDetailScreen({
                 )}
               </View>
             )}
-            {!summaryMarkdown ? primaryAction : null}
+            {!standardSummaryMarkdown ? primaryAction : null}
           </View>
           {summaryMarkdown && thread.tags.length ? (
             <View style={styles.tags}>
@@ -554,8 +677,11 @@ export function ThreadDetailScreen({
               {summaryMarkdown ? (
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityLabel="요약 공유"
                   style={styles.menuItem}
-                  onPress={() => choose(() => onShareSummary(thread))}
+                  onPress={() =>
+                    choose(() => onShareSummary(thread, summaryMarkdown))
+                  }
                 >
                   <Text style={styles.menuText}>요약 공유</Text>
                 </Pressable>
@@ -663,8 +789,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: spacing.sm,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.sm,
   },
+  summaryHeaderStandalone: { marginBottom: spacing.lg },
   summaryIdentity: {
     minWidth: 0,
     flex: 1,

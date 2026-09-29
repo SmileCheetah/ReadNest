@@ -39,6 +39,11 @@ enum SummaryTaskState {
   FAILED
 }
 
+enum SummaryDensity {
+  CONCISE
+  DETAILED
+}
+
 model User {
   id           String         @id @default(cuid())
   email        String         @unique
@@ -87,12 +92,59 @@ model SavedArticle {
   user                 User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   threadParts          ThreadPart[]
   summaryTasks         SummaryTask[]
+  summaryVariants      SummaryVariant[]
 
   @@unique([userId, normalizedUrl])
   @@index([userId, savedAt])
   @@index([userId, processStatus])
   @@index([userId, readStatus])
   @@map("saved_articles")
+}
+
+model SummaryVariant {
+  id               String           @id @default(cuid())
+  articleId        String
+  density          SummaryDensity
+  generation       Int              @default(0)
+  sourceGeneration Int
+  state            SummaryTaskState @default(PENDING)
+  markdown         String?          @db.LongText
+  errorCode        String?
+  retryable        Boolean          @default(true)
+  retryAt          DateTime?
+  lastError        String?          @db.Text
+  generatedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  article          SavedArticle     @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  tasks            SummaryVariantTask[]
+
+  @@unique([articleId, density])
+  @@index([articleId, sourceGeneration])
+  @@map("summary_variants")
+}
+
+model SummaryVariantTask {
+  id               String           @id @default(cuid())
+  variantId        String
+  generation       Int
+  sourceGeneration Int
+  requestKey       String?
+  state            SummaryTaskState @default(PENDING)
+  attempts         Int              @default(0)
+  notBefore        DateTime         @default(now())
+  leaseToken       String?
+  leaseExpiresAt   DateTime?
+  result           Json?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  variant          SummaryVariant   @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, generation])
+  @@unique([variantId, requestKey])
+  @@index([state, notBefore])
+  @@index([state, leaseExpiresAt])
+  @@map("summary_variant_tasks")
 }
 
 // Durable dispatch record. Network calls never run inside the DB transaction.

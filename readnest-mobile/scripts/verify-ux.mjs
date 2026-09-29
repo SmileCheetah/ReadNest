@@ -14,6 +14,7 @@ if (!['127.0.0.1', 'localhost'].includes(new URL(url).hostname)) {
 const output = process.env.READNEST_QA_OUTPUT || '/tmp/readnest-ux-verification';
 await mkdir(output, { recursive: true });
 const summary = '# AI 시대의 개발자는 판단한다\n\nAI가 코드를 작성해도 **무엇을 만들지 결정하고 결과를 검토하는 일**은 사람의 몫이다.\n\n### 소프트웨어 기본기가 필요한 이유\n\n**1. 전체 흐름을 이해한다**\n\nUI와 API, 인증과 데이터가 어떻게 연결되는지 알아야 결과를 판단할 수 있다.\n\n**2. 데이터를 설계한다**\n\n데이터 구조는 쉽게 바꾸기 어렵다. 정합성과 맥락을 처음부터 고려해야 한다.\n\n**3. 상황에 맞는 구조를 선택한다**\n\n사용자 수와 비용, 성능에 맞춰 기술을 선택한다. 지금 동작하는 것과 다음 단계에서도 버티는 것은 다르다.\n\n**4. 신뢰성과 보안을 갖춘다**\n\n테스트와 장애 대응, 보안은 개발 초기부터 설계한다.\n\n**5. 운영을 이어 간다**\n\n배포 후에도 모니터링과 복구, 성능 측정이 필요하다.\n\n### 한 줄 요약\n\n**AI 시대의 경쟁력은 코딩 속도보다 기술적 판단력에 있다.**';
+const conciseSummary = '# AI 시대의 개발자는 판단한다\n\n**AI가 구현을 맡을수록 사람은 무엇을 만들고 결과가 맞는지 판단해야 한다.**\n\n### 기억할 내용\n\n소프트웨어의 전체 흐름, 데이터 구조, 운영과 보안을 이해하는 능력이 중요하다.';
 const longSummary = '# 긴 문서 읽기 검증\n\n이 문서는 접힌 화면이 내용을 건너뛰지 않는지 확인하는 테스트 자료다.\n\n' + Array.from({ length: 35 }, (_, index) => `### ${index + 1}. 확인할 내용\n\n${'독립적인 주장과 조건을 순서대로 읽는다. 내용이 길어져도 중간 문단을 건너뛰어 결론만 먼저 보여주지 않는다. '.repeat(3)}`).join('\n\n');
 const now = new Date().toISOString();
 const user = { id: 'qa-user', email: 'qa@example.invalid', nickname: '읽기 테스트', createdAt: now, updatedAt: now };
@@ -25,6 +26,7 @@ function article(id, title, markdown, status = 'SUMMARY_DONE') {
     summaryPreview: markdown ? 'AI가 코드를 작성해도 무엇을 만들지 결정하고 결과를 검토하는 일은 사람의 몫이다.' : null,
     processStatus: status, readStatus: 'UNREAD', keyPoints: [], tags: [], savedAt: now, createdAt: now, updatedAt: now,
     generation: 1, resultGeneration: markdown ? 1 : null, generatedAt: markdown ? now : null,
+    summaryVariants: markdown ? [{ density: 'CONCISE', sourceGeneration: 1, state: 'SUCCEEDED', summaryMarkdown: conciseSummary, retryable: false, retryAfterSeconds: 0, generatedAt: now }] : [],
     stage: status === 'SUMMARIZING' ? 'GENERATING' : status === 'SUMMARY_FAILED' ? 'FAILED' : 'DONE',
     retryable: true, retryAfterSeconds: 0, errorCode: status === 'SUMMARY_FAILED' ? 'EXTRACTION_FAILED' : null,
     lastSummaryError: status === 'SUMMARY_FAILED' ? '원문을 가져오지 못했어요. 원문 링크를 확인한 뒤 다시 시도해 주세요.' : null,
@@ -92,6 +94,11 @@ try {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   assert.equal(overflow, false, 'Document should not overflow horizontally at 320px');
   assert.equal((await page.locator('body').innerText()).split('AI 시대의 개발자는 판단한다').length - 1, 1, 'Display title exactly once');
+  assert.equal(await page.getByRole('tab', { name: '기본 요약', exact: true }).getAttribute('aria-selected'), 'true', 'Standard density is selected by default');
+  await page.getByRole('tab', { name: '핵심만 요약', exact: true }).click();
+  await page.getByText('AI가 구현을 맡을수록 사람은', { exact: false }).waitFor();
+  await page.screenshot({ path: path.join(output, 'detail-concise-320.png'), fullPage: true });
+  assert.equal(await page.getByRole('tab', { name: '핵심만 요약', exact: true }).getAttribute('aria-selected'), 'true', 'Cached concise density switches immediately');
   await page.getByRole('button', { name: '뒤로가기', exact: true }).click();
   await page.getByText('늦게 완료된 요약', { exact: true }).first().waitFor({ timeout: 20000 });
   await page.getByRole('tab', { name: '보관함', exact: true }).click();
@@ -103,7 +110,7 @@ try {
   await page.getByText('35. 확인할 내용', { exact: true }).first().waitFor();
   assert.equal(errors.length, 0, `Browser errors: ${errors.join('; ')}`);
   await writeFile(path.join(output, 'report.json'), JSON.stringify({ viewportWidths: [390, 320], errors, calls, overflow, mockedApi: true, nativeAccessibilityVerified: false }, null, 2));
-  console.log(JSON.stringify({ success: true, output, screenshots: ['home-390.png', 'detail-390.png', 'detail-320.png', 'long-collapsed-320.png'], apiRequests: calls.length }, null, 2));
+  console.log(JSON.stringify({ success: true, output, screenshots: ['home-390.png', 'detail-390.png', 'detail-320.png', 'detail-concise-320.png', 'long-collapsed-320.png'], apiRequests: calls.length }, null, 2));
 } catch (error) {
   if (page) {
     await page.screenshot({ path: path.join(output, 'failure.png'), fullPage: true });

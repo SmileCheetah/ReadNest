@@ -11,6 +11,8 @@ jest.mock("../api/readnestApi", () => ({
     listArticlePage: jest.fn(),
     getArticle: jest.fn(),
     getSummaryStatus: jest.fn(),
+    getSummaryVariants: jest.fn(),
+    requestSummaryVariant: jest.fn(),
     updateReadStatus: jest.fn(),
     retrySummary: jest.fn(),
     deleteArticle: jest.fn(),
@@ -119,6 +121,13 @@ beforeEach(() => {
   api.updateReadStatus.mockImplementation(async (_token, id, status) =>
     article(id, { readStatus: status }),
   );
+  api.requestSummaryVariant.mockResolvedValue({
+    density: "CONCISE",
+    sourceGeneration: 1,
+    state: "PENDING",
+    retryable: false,
+    retryAfterSeconds: 0,
+  });
 });
 afterEach(async () => {
   if (tree) await act(async () => tree.unmount());
@@ -276,4 +285,23 @@ it("reuses the same idempotency key after an uncertain retry response", async ()
   expect(api.retrySummary.mock.calls[1][2]).toBe(
     api.retrySummary.mock.calls[0][2],
   );
+});
+
+it("stores a requested density independently while the standard document remains", async () => {
+  await mount();
+  const current = library.homeThreads[0];
+  await act(async () => library.requestSummaryDensity(current, "CONCISE"));
+
+  expect(api.requestSummaryVariant).toHaveBeenCalledWith(
+    "user-a",
+    "a",
+    "CONCISE",
+    expect.stringMatching(/^density-concise-/),
+  );
+  expect(library.homeThreads[0].summaryMeta?.summaryMarkdown).toContain(
+    "실제 본문",
+  );
+  expect(library.homeThreads[0].summaryVariants).toEqual([
+    expect.objectContaining({ density: "CONCISE", state: "PENDING" }),
+  ]);
 });

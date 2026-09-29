@@ -206,9 +206,9 @@ export default function App() {
       );
     }
   };
-  const share = async (thread: SavedThread) => {
+  const share = async (thread: SavedThread, markdown?: string) => {
     try {
-      await Share.share({ message: formatThreadShareText(thread) });
+      await Share.share({ message: formatThreadShareText(thread, markdown) });
     } catch {
       Alert.alert("공유하지 못했어요", "잠시 후 다시 시도해 주세요.");
     }
@@ -386,7 +386,10 @@ export default function App() {
                   void changeRead(thread, "READ_LATER")
                 }
                 onRetrySummary={retry}
-                onShareSummary={(thread) => void share(thread)}
+                onRequestSummaryDensity={library.requestSummaryDensity}
+                onShareSummary={(thread, markdown) =>
+                  void share(thread, markdown)
+                }
                 onDelete={remove}
                 loadingDetail={library.detailLoading}
                 detailError={library.detailError}
@@ -400,9 +403,11 @@ export default function App() {
   );
 }
 
-function formatThreadShareText(thread: SavedThread) {
+function formatThreadShareText(thread: SavedThread, markdown?: string) {
   return [
-    thread.summaryMeta?.summaryMarkdown?.trim() || "요약이 아직 없습니다.",
+    markdown?.trim() ||
+      thread.summaryMeta?.summaryMarkdown?.trim() ||
+      "요약이 아직 없습니다.",
     thread.originalUrl ? `원문: ${thread.originalUrl}` : null,
   ]
     .filter(Boolean)

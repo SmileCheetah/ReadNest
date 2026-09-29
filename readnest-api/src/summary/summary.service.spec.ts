@@ -14,6 +14,7 @@ describe('summary polling contract', () => {
       { savedArticle: { findFirst } } as never,
       {} as never,
       {} as never,
+      {} as never,
     );
     const status = await service.getArticleSummaryStatus('owner', 'article');
     expect(findFirst).toHaveBeenCalledWith(

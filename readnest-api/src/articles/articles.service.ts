@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma, ProcessStatus, ReadStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SummaryService } from '../summary/summary.service';
+import { summaryVariantDto } from '../summary/summary-variant.service';
 import { CreateArticleDto } from './dto/create-article.dto';
 import { ListArticlesQueryDto } from './dto/list-articles-query.dto';
 import { parseThreadsUrl } from './utils/normalize-url';
@@ -320,6 +321,7 @@ export class ArticlesService {
             threadGroup: true,
           },
         },
+        summaryVariants: true,
       },
     });
 
@@ -327,7 +329,17 @@ export class ArticlesService {
       throw new NotFoundException('저장글을 찾을 수 없습니다.');
     }
 
-    return withArticleStatus(article);
+    const { summaryVariants, ...savedArticle } = article;
+    return {
+      ...withArticleStatus(savedArticle),
+      summaryVariants: summaryVariants
+        .filter(
+          (variant) =>
+            article.resultGeneration !== null &&
+            variant.sourceGeneration === article.resultGeneration,
+        )
+        .map(summaryVariantDto),
+    };
   }
 
   async checkDuplicate(userId: string, url: string) {

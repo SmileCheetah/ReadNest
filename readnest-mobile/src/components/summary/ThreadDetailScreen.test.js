@@ -30,6 +30,7 @@ const article = {
   savedDateLabel: "오늘",
   savedAt: "2026-09-29",
   processStatus: "SUMMARY_DONE",
+  resultGeneration: 1,
   readStatus: "UNREAD",
 };
 
@@ -41,6 +42,7 @@ function props(thread = article) {
     onToggleReadStatus: jest.fn(),
     onMarkReadLater: jest.fn(),
     onRetrySummary: jest.fn(),
+    onRequestSummaryDensity: jest.fn(),
     onShareSummary: jest.fn(),
     onDelete: jest.fn(),
   };
@@ -282,6 +284,111 @@ it("offers a recoverable copy error and allows a successful retry", async () => 
     await button(tree, "요약 복사").props.onPress();
   });
   expect(text(tree)).toContain("✓ 복사됨");
+});
+
+it("requests an uncached density while keeping the standard document visible", async () => {
+  let finish;
+  const callbacks = props();
+  callbacks.onRequestSummaryDensity.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const tree = await render(React.createElement(ThreadDetailScreen, callbacks));
+
+  await act(async () => {
+    button(tree, "핵심만 요약").props.onPress();
+  });
+
+  expect(callbacks.onRequestSummaryDensity).toHaveBeenCalledWith(
+    article,
+    "CONCISE",
+  );
+  expect(text(tree)).toContain("핵심만 요약을 만들고 있어요");
+  expect(text(tree)).toContain("이유를 설명합니다.");
+
+  await act(async () => finish());
+});
+
+it("switches to a cached density immediately and copies the visible document", async () => {
+  const concise = "# 짧은 제목\n\n짧게 기억할 내용입니다.";
+  const denseArticle = {
+    ...article,
+    summaryVariants: [
+      {
+        density: "CONCISE",
+        sourceGeneration: 1,
+        state: "SUCCEEDED",
+        summaryMarkdown: concise,
+        retryable: false,
+        retryAfterSeconds: 0,
+        generatedAt: "2026-09-30T00:00:00.000Z",
+      },
+    ],
+  };
+  const callbacks = props(denseArticle);
+  const tree = await render(React.createElement(ThreadDetailScreen, callbacks));
+  expect(button(tree, "기본 요약").props.accessibilityState.selected).toBe(
+    true,
+  );
+
+  await act(async () => {
+    button(tree, "핵심만 요약").props.onPress();
+  });
+  expect(button(tree, "핵심만 요약").props.accessibilityState.selected).toBe(
+    true,
+  );
+  expect(callbacks.onRequestSummaryDensity).not.toHaveBeenCalled();
+  expect(text(tree)).toContain("짧게 기억할 내용입니다.");
+  expect(text(tree)).not.toContain("이유를 설명합니다.");
+
+  await act(async () => {
+    await button(tree, "요약 복사").props.onPress();
+  });
+  expect(Clipboard.setStringAsync).toHaveBeenCalledWith(
+    `${concise}\n\n원문: ${article.originalUrl}`,
+  );
+  await act(async () => {
+    button(tree, "더보기").props.onPress();
+  });
+  await act(async () => {
+    button(tree, "요약 공유").props.onPress();
+  });
+  expect(callbacks.onShareSummary).toHaveBeenCalledWith(
+    denseArticle,
+    concise,
+  );
+});
+
+it("keeps the standard document and offers retry when a density fails", async () => {
+  const failedArticle = {
+    ...article,
+    summaryVariants: [
+      {
+        density: "DETAILED",
+        sourceGeneration: 1,
+        state: "FAILED",
+        retryable: true,
+        retryAfterSeconds: 0,
+      },
+    ],
+  };
+  const callbacks = props(failedArticle);
+  const tree = await render(React.createElement(ThreadDetailScreen, callbacks));
+
+  await act(async () => {
+    button(tree, "자세히 요약").props.onPress();
+  });
+  expect(text(tree)).toContain("이 밀도의 요약을 만들지 못했어요");
+  expect(text(tree)).toContain("이유를 설명합니다.");
+  await act(async () => {
+    await button(tree, "자세히 요약 다시 시도").props.onPress();
+  });
+  expect(callbacks.onRequestSummaryDensity).toHaveBeenCalledWith(
+    failedArticle,
+    "DETAILED",
+  );
 });
 
 it("reveals every intermediate block on expansion instead of jumping to a short conclusion", async () => {

@@ -38,4 +38,27 @@ export class SummaryController {
   status(@CurrentUser() user: AuthUser, @Param('articleId') articleId: string) {
     return this.summaryService.getArticleSummaryStatus(user.id, articleId);
   }
+
+  @Get('variants')
+  variants(
+    @CurrentUser() user: AuthUser,
+    @Param('articleId') articleId: string,
+  ) {
+    return this.summaryService.getArticleSummaryVariants(user.id, articleId);
+  }
+
+  @Post('variants/:density')
+  requestVariant(
+    @CurrentUser() user: AuthUser,
+    @Param('articleId') articleId: string,
+    @Param('density') density: string,
+    @Headers('idempotency-key') key?: string,
+  ) {
+    return this.summaryService.requestArticleSummaryVariant(
+      user.id,
+      articleId,
+      density,
+      key,
+    );
+  }
 }

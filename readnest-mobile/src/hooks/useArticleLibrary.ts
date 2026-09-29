@@ -4,10 +4,15 @@ import {
   ApiError,
   readnestApi,
   type ApiArticle,
+  type ApiSummaryVariant,
   type ListArticlesOptions,
 } from "../api/readnestApi";
 import { mapArticleToThread } from "../api/articleMapper";
-import type { ReadStatus, SavedThread } from "../data/mockThreads";
+import type {
+  ReadStatus,
+  SavedThread,
+  SummaryDensity,
+} from "../data/mockThreads";
 import {
   appendUniqueIds,
   createReadWriteQueue,
@@ -24,6 +29,26 @@ const message = (error: unknown) =>
   error instanceof ApiError
     ? error.message
     : "연결을 확인한 뒤 다시 불러와 주세요.";
+
+function replaceSummaryVariant(
+  thread: SavedThread,
+  variant: ApiSummaryVariant,
+): SavedThread {
+  return {
+    ...thread,
+    summaryVariants: [
+      ...(thread.summaryVariants ?? []).filter(
+        (item) => item.density !== variant.density,
+      ),
+      variant,
+    ],
+  };
+}
+
+const hasPendingVariant = (thread: SavedThread) =>
+  thread.summaryVariants?.some(
+    (variant) => variant.state === "PENDING" || variant.state === "RUNNING",
+  ) ?? false;
 
 export function useArticleLibrary(
   token: string | null,
@@ -66,6 +91,8 @@ export function useArticleLibrary(
   const visit = useRef({ id: "", automatic: false, manual: false });
   const retryInFlight = useRef(new Set<string>());
   const retryKeys = useRef(new Map<string, string>());
+  const variantInFlight = useRef(new Set<string>());
+  const variantKeys = useRef(new Map<string, string>());
   const readQueued = useRef(new Map<string, number>());
   const fetchInFlight = useRef(new Map<string, Promise<void>>());
   const statusInFlight = useRef(new Map<string, Promise<void>>());
@@ -369,6 +396,8 @@ export function useArticleLibrary(
     queue.current = createReadWriteQueue();
     retryInFlight.current.clear();
     retryKeys.current.clear();
+    variantInFlight.current.clear();
+    variantKeys.current.clear();
     readQueued.current.clear();
     visit.current = { id: "", automatic: false, manual: false };
     cursorRef.current = null;
@@ -426,7 +455,9 @@ export function useArticleLibrary(
       try {
         const pending = Object.values(cacheRef.current).filter(
           (item) =>
-            (isProcessing(item) || item.documentStale) &&
+            (isProcessing(item) ||
+              item.documentStale ||
+              hasPendingVariant(item)) &&
             !removed.current.has(item.id),
         );
         // Limit simultaneous network calls; the same article has one polling owner.
@@ -439,7 +470,7 @@ export function useArticleLibrary(
             pending
               .slice(index, index + 4)
               .map((item) =>
-                item.documentStale
+                item.documentStale || hasPendingVariant(item)
                   ? fetchDetail(item.id)
                   : fetchStatus(item.id),
               ),
@@ -696,6 +727,62 @@ export function useArticleLibrary(
     [receive],
   );
 
+  const requestSummaryDensity = useCallback(
+    async (
+      thread: SavedThread,
+      density: Exclude<SummaryDensity, "STANDARD">,
+    ) => {
+      const sessionToken = activeToken.current;
+      const requestId = `${thread.id}:${density}`;
+      if (!sessionToken || variantInFlight.current.has(requestId)) return;
+      const current = cacheRef.current[thread.id] ?? thread;
+      const cached = current.summaryVariants?.find(
+        (variant) => variant.density === density,
+      );
+      if (
+        cached?.state === "SUCCEEDED" ||
+        cached?.state === "PENDING" ||
+        cached?.state === "RUNNING"
+      )
+        return;
+      const session = epoch.current;
+      const key =
+        variantKeys.current.get(requestId) ??
+        `density-${density.toLowerCase()}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      variantKeys.current.set(requestId, key);
+      variantInFlight.current.add(requestId);
+      try {
+        const variant = await readnestApi.requestSummaryVariant(
+          sessionToken,
+          thread.id,
+          density,
+          key,
+        );
+        if (!isActive(session, sessionToken)) return;
+        const latest = cacheRef.current[thread.id];
+        if (latest) {
+          const next = replaceSummaryVariant(latest, variant);
+          cacheRef.current = { ...cacheRef.current, [thread.id]: next };
+          setCache(cacheRef.current);
+        }
+        variantKeys.current.delete(requestId);
+      } catch (error) {
+        if (
+          isActive(session, sessionToken) &&
+          error instanceof ApiError &&
+          error.status >= 400 &&
+          error.status < 500
+        )
+          variantKeys.current.delete(requestId);
+        throw error;
+      } finally {
+        if (isActive(session, sessionToken))
+          variantInFlight.current.delete(requestId);
+      }
+    },
+    [],
+  );
+
   const remove = useCallback(
     async (thread: SavedThread) => {
       const sessionToken = activeToken.current;
@@ -747,6 +834,7 @@ export function useArticleLibrary(
     changeRead,
     acceptCreated,
     retry,
+    requestSummaryDensity,
     remove,
   };
 }

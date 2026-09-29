@@ -43,6 +43,17 @@ export type ApiSummaryMeta = {
   summaryMarkdown?: string;
 };
 
+export type ApiSummaryVariant = {
+  density: "CONCISE" | "DETAILED";
+  sourceGeneration: number;
+  state: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
+  summaryMarkdown?: string;
+  errorCode?: string | null;
+  retryable: boolean;
+  retryAfterSeconds: number;
+  generatedAt?: string | null;
+};
+
 export type ApiArticle = {
   id: string;
   source: "THREADS";
@@ -68,6 +79,7 @@ export type ApiArticle = {
   retryable?: boolean;
   retryAfterSeconds?: number;
   sourceCompleteness?: "UNKNOWN" | "PARTIAL" | "COMPLETE";
+  summaryVariants?: ApiSummaryVariant[];
   keyPoints: string[] | null;
   tags: string[] | null;
   extractionStatus: string | null;
@@ -141,6 +153,10 @@ export type ApiSummaryStatus = Pick<ApiArticle, "id" | "processStatus"> &
       | "summaryPreview"
     >
   >;
+export type ApiSummaryVariants = {
+  sourceGeneration: number | null;
+  variants: ApiSummaryVariant[];
+};
 
 export type ListArticlesOptions = {
   period?: "today" | "week" | "last-week" | "month" | "all";
@@ -306,6 +322,29 @@ export const readnestApi = {
       token,
       signal,
     });
+  },
+
+  getSummaryVariants(token: string, articleId: string, signal?: AbortSignal) {
+    return request<ApiSummaryVariants>(
+      `/articles/${articleId}/summary/variants`,
+      { token, signal },
+    );
+  },
+
+  requestSummaryVariant(
+    token: string,
+    articleId: string,
+    density: "CONCISE" | "DETAILED",
+    idempotencyKey?: string,
+  ) {
+    return request<ApiSummaryVariant>(
+      `/articles/${articleId}/summary/variants/${density.toLowerCase()}`,
+      {
+        token,
+        method: "POST",
+        idempotencyKey,
+      },
+    );
   },
 
   updateReadStatus(token: string, articleId: string, readStatus: ReadStatus) {

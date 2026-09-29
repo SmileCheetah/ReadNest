@@ -1,0 +1,23 @@
+{
+  "viewportWidths": [
+    390,
+    320
+  ],
+  "errors": [],
+  "calls": [
+    "POST /auth/guest",
+    "GET /articles",
+    "GET /articles/qa-ready",
+    "PATCH /articles/qa-ready/read-status",
+    "GET /articles/qa-processing/summary/status",
+    "GET /articles/qa-processing/summary/status",
+    "GET /articles/qa-processing/summary/status",
+    "GET /articles/qa-processing",
+    "GET /articles",
+    "GET /articles/qa-long",
+    "PATCH /articles/qa-long/read-status"
+  ],
+  "overflow": false,
+  "mockedApi": true,
+  "nativeAccessibilityVerified": false
+}

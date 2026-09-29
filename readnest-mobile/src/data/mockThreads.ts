@@ -5,6 +5,17 @@ export type ProcessStatus =
   | "SUMMARY_FAILED"
   | "CONTEXT_INSUFFICIENT";
 export type ReadStatus = "UNREAD" | "READ" | "READ_LATER";
+export type SummaryDensity = "CONCISE" | "STANDARD" | "DETAILED";
+export type SummaryVariant = {
+  density: Exclude<SummaryDensity, "STANDARD">;
+  sourceGeneration: number;
+  state: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
+  summaryMarkdown?: string;
+  errorCode?: string | null;
+  retryable: boolean;
+  retryAfterSeconds: number;
+  generatedAt?: string | null;
+};
 
 export type SavedThread = {
   id: string;
@@ -24,6 +35,7 @@ export type SavedThread = {
   retryable?: boolean;
   retryAfterSeconds?: number;
   sourceCompleteness?: "UNKNOWN" | "PARTIAL" | "COMPLETE";
+  summaryVariants?: SummaryVariant[];
   summaryMeta?: {
     summaryMarkdown?: string;
     summaryType: string;

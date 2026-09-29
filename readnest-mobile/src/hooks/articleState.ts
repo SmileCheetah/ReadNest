@@ -35,6 +35,7 @@ export function mergeThread(
         rawText: current.rawText,
         summary: current.summary,
         summaryMeta: current.summaryMeta,
+        summaryVariants: current.summaryVariants,
         documentStale: current.documentStale || changedDocument,
         resultGeneration: current.resultGeneration,
         generatedAt: current.generatedAt,

@@ -61,6 +61,9 @@ export function mapArticleToThread(article: ApiArticle): SavedThread {
     retryable: article.retryable,
     retryAfterSeconds: article.retryAfterSeconds,
     sourceCompleteness: article.sourceCompleteness,
+    summaryVariants: article.summaryVariants?.map((variant) => ({
+      ...variant,
+    })),
     summaryMeta: article.summaryMeta
       ? {
           summaryMarkdown: article.summaryMeta.summaryMarkdown,

@@ -35,6 +35,8 @@ export type SummaryResult = {
   meta: StructuredSummaryResult;
 };
 
+export type SummaryDensity = 'STANDARD' | 'CONCISE' | 'DETAILED';
+
 export const SUMMARY_EDITOR_PROMPT = `너는 사용자가 저장한 글을 나중에 다시 읽지 않아도 핵심 내용을 빠르게 이해할 수 있도록 정리하는 요약 에디터다.
 
 이 요약은 원문을 대체하지 않지만, 사용자가 나중에 짧은 시간 안에 글의 핵심 주장과 다시 읽을 가치를 떠올릴 수 있게 한다. 글을 단순히 짧게 줄이는 것이 아니라, 원문의 핵심 주장과 중요한 근거, 구조를 보존하면서 읽기 좋은 형태로 재구성한다.
@@ -105,8 +107,31 @@ export const SUMMARY_EDITOR_PROMPT = `너는 사용자가 저장한 글을 나�
 
 export const MAX_ARTICLE_TITLE_LENGTH = 191;
 
-export function buildSummaryPrompt(source: string) {
-  return `${SUMMARY_EDITOR_PROMPT}\n\n다음 글을 요약해줘.\n\n${source}`;
+export const SUMMARY_DENSITY_PROMPTS: Record<
+  Exclude<SummaryDensity, 'STANDARD'>,
+  string
+> = {
+  CONCISE: `## 이번 출력의 읽기 밀도: 핵심만
+
+- 사용자가 짧은 시간 안에 저장 이유와 기억할 내용을 떠올릴 수 있게 압축한다.
+- 항목 수를 임의로 제한하지 않는다. 원문의 독립적인 주장·단계·조건·비교·중요 수치는 유지한다.
+- 각 항목은 핵심 의미가 드러나는 한 문장을 우선하고, 이해에 꼭 필요한 경우에만 두 문장을 사용한다.
+- 결론 이해에 필요하지 않은 사례·기술 이름·부연 설명은 줄인다.`,
+  DETAILED: `## 이번 출력의 읽기 밀도: 자세히
+
+- 이미 만든 요약을 늘리지 말고 아래에 제공된 원문 전체에서 다시 요약한다.
+- 원문의 독립적인 주장·단계·조건·비교·중요 수치를 유지하면서 논리를 이해하는 데 필요한 근거·예외·중요 사례를 보존한다.
+- 항목 수는 원문 구조에 맞게 정하고, 같은 의미를 반복해 분량만 늘리지 않는다.
+- 제공된 원문 범위 밖의 내용이나 수집되지 않은 맥락은 추측하지 않는다.`,
+};
+
+export function buildSummaryPrompt(
+  source: string,
+  density: SummaryDensity = 'STANDARD',
+) {
+  const densityPrompt =
+    density === 'STANDARD' ? '' : `\n\n${SUMMARY_DENSITY_PROMPTS[density]}`;
+  return `${SUMMARY_EDITOR_PROMPT}${densityPrompt}\n\n다음 글을 요약해줘.\n\n${source}`;
 }
 
 @Injectable()
@@ -123,7 +148,12 @@ export class AiSummaryService {
       : null;
   }
 
-  async summarize(input: { url: string; title?: string | null; text: string }) {
+  async summarize(input: {
+    url: string;
+    title?: string | null;
+    text: string;
+    density?: SummaryDensity;
+  }) {
     if (!input.text.trim())
       throw new SummaryGenerationError(
         '원문을 가져오지 못했습니다. 원문 접근 상태를 확인해 주세요.',
@@ -141,7 +171,7 @@ export class AiSummaryService {
     try {
       const response = await this.client.responses.create({
         model: this.model,
-        input: buildSummaryPrompt(input.text),
+        input: buildSummaryPrompt(input.text, input.density),
       });
       const summaryMarkdown = response.output_text?.trim() ?? '';
 
@@ -193,7 +223,12 @@ export class AiSummaryService {
 
   private normalizeSummary(
     summaryMarkdown: string,
-    input: { url: string; title?: string | null; text: string },
+    input: {
+      url: string;
+      title?: string | null;
+      text: string;
+      density?: SummaryDensity;
+    },
   ): SummaryResult {
     const title = this.resolveArticleTitle(summaryMarkdown, input);
     const firstParagraph = summaryPreview(summaryMarkdown) ?? '';

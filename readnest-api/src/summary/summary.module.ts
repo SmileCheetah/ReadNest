@@ -8,11 +8,18 @@ import { SummaryProcessor } from './summary.processor';
 import { SummaryService } from './summary.service';
 import { ThreadDetectionService } from './thread-detection.service';
 import { SummaryJobService } from './summary-job.service';
+import { SUMMARY_VARIANT_QUEUE } from './summary.constants';
+import { SummaryVariantJobService } from './summary-variant-job.service';
+import { SummaryVariantProcessor } from './summary-variant.processor';
+import { SummaryVariantService } from './summary-variant.service';
 
 @Module({
   imports: [
     BullModule.registerQueue({
       name: SUMMARY_QUEUE,
+    }),
+    BullModule.registerQueue({
+      name: SUMMARY_VARIANT_QUEUE,
     }),
   ],
   controllers: [SummaryController],
@@ -23,6 +30,9 @@ import { SummaryJobService } from './summary-job.service';
     ContentExtractorService,
     AiSummaryService,
     ThreadDetectionService,
+    SummaryVariantService,
+    SummaryVariantJobService,
+    SummaryVariantProcessor,
   ],
   exports: [SummaryService],
 })

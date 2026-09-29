@@ -12,6 +12,7 @@ import {
   withArticleStatus,
 } from '../articles/utils/summary-preview';
 import { SummaryJobService } from './summary-job.service';
+import { SummaryVariantService } from './summary-variant.service';
 export type { SummaryJobData } from './summary-job.service';
 
 @Injectable()
@@ -20,6 +21,7 @@ export class SummaryService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly jobs: SummaryJobService,
+    private readonly variants: SummaryVariantService,
   ) {}
 
   enqueueArticleSummary(articleId: string) {
@@ -147,5 +149,18 @@ export class SummaryService {
     }
 
     return withArticleStatus(article);
+  }
+
+  getArticleSummaryVariants(userId: string, articleId: string) {
+    return this.variants.list(userId, articleId);
+  }
+
+  requestArticleSummaryVariant(
+    userId: string,
+    articleId: string,
+    density: string,
+    requestKey?: string,
+  ) {
+    return this.variants.request(userId, articleId, density, requestKey);
   }
 }
