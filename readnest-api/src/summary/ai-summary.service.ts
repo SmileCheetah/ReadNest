@@ -142,7 +142,7 @@ export class AiSummaryService {
 
   constructor(configService: ConfigService) {
     const apiKey = configService.get<string>('OPENAI_API_KEY');
-    this.model = configService.get<string>('OPENAI_MODEL') ?? 'gpt-5.6-luna';
+    this.model = configService.get<string>('OPENAI_MODEL')?.trim() || 'gpt-6-luna';
     this.client = apiKey
       ? new OpenAI({ apiKey, timeout: 120000, maxRetries: 0 })
       : null;

@@ -286,6 +286,40 @@ it("offers a recoverable copy error and allows a successful retry", async () => 
   expect(text(tree)).toContain("✓ 복사됨");
 });
 
+it("copies a source note with provenance and supports retry after clipboard failure", async () => {
+  const tree = await render(React.createElement(ThreadDetailScreen, props()));
+  await act(async () => button(tree, "더보기").props.onPress());
+  Clipboard.setStringAsync.mockRejectedValueOnce(new Error("unavailable"));
+  await act(async () => button(tree, "Obsidian 노트 복사").props.onPress());
+  expect(Alert.alert).toHaveBeenCalledWith(
+    "복사하지 못했어요",
+    expect.stringContaining("Obsidian 노트 복사"),
+  );
+  await act(async () => button(tree, "더보기").props.onPress());
+  await act(async () => button(tree, "Obsidian 노트 복사").props.onPress());
+  const note = Clipboard.setStringAsync.mock.calls.at(-1)[0];
+  expect(note).toContain(markdown);
+  expect(note).toContain('summary_density: "STANDARD"');
+  expect(note).toContain('readnest_id: "article-one"');
+  expect(note).toContain("원문 전체 수집 여부가 확인되지 않은");
+  expect(text(tree)).toContain("✓ 복사됨");
+});
+
+it("does not offer source-note export without a completed summary", async () => {
+  const tree = await render(
+    React.createElement(
+      ThreadDetailScreen,
+      props({
+        ...article,
+        summaryMeta: undefined,
+        processStatus: "SUMMARIZING",
+      }),
+    ),
+  );
+  await act(async () => button(tree, "더보기").props.onPress());
+  expect(button(tree, "Obsidian 노트 복사")).toBeUndefined();
+});
+
 it("requests an uncached density while keeping the standard document visible", async () => {
   let finish;
   const callbacks = props();
@@ -355,10 +389,14 @@ it("switches to a cached density immediately and copies the visible document", a
   await act(async () => {
     button(tree, "요약 공유").props.onPress();
   });
-  expect(callbacks.onShareSummary).toHaveBeenCalledWith(
-    denseArticle,
-    concise,
-  );
+  expect(callbacks.onShareSummary).toHaveBeenCalledWith(denseArticle, concise);
+  await act(async () => button(tree, "더보기").props.onPress());
+  await act(async () => button(tree, "Obsidian 노트 복사").props.onPress());
+  const note = Clipboard.setStringAsync.mock.calls.at(-1)[0];
+  expect(note).toContain(concise);
+  expect(note).not.toContain("이유를 설명합니다.");
+  expect(note).toContain('summary_density: "CONCISE"');
+  expect(note).toContain('summary_generated_at: "2026-09-30T00:00:00.000Z"');
 });
 
 it("keeps the standard document and offers retry when a density fails", async () => {

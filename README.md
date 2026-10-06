@@ -24,7 +24,7 @@ Threads에서 발견한 글을 저장하고, AI로 요약해 다시 읽을 수 �
 - ORM: Prisma
 - Auth: JWT
 - Async jobs: Redis, BullMQ
-- AI summary: OpenAI Responses API (`gpt-5.6-luna`)
+- AI summary: OpenAI Responses API (`gpt-6-luna`)
 - Frontend: React Native / Expo (`readnest-mobile`)
 
 ## 현재 구현 상태
@@ -135,7 +135,7 @@ JWT_SECRET=
 JWT_EXPIRES_IN=7d
 REDIS_URL=
 OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5.6-luna
+OPENAI_MODEL=gpt-6-luna
 DAILY_SAVE_LIMIT=50
 SUMMARY_RETRY_LIMIT=3
 PLAYWRIGHT_CHANNEL=chrome
@@ -177,7 +177,7 @@ KoDeploy가 Python용 `mysql+pymysql://...` 형식의 `DATABASE_URL`을 함께 �
 | `REDIS_PASSWORD` | Redis password. 필요한 서비스에서만 사용 |
 | `REDIS_TLS` | Redis TLS 사용 여부. `true`이면 TLS 활성화 |
 | `OPENAI_API_KEY` | 서버 전용 OpenAI API key. GitHub와 모바일 앱에 포함하지 않음 |
-| `OPENAI_MODEL` | 요약 모델. 기본값 `gpt-5.6-luna` |
+| `OPENAI_MODEL` | 요약 모델. 기본값 `gpt-6-luna` |
 | `DAILY_SAVE_LIMIT` | 사용자별 하루 저장 제한 |
 | `SUMMARY_RETRY_LIMIT` | 요약 수동 재시도 제한 |
 | `PLAYWRIGHT_CHANNEL` | Playwright 브라우저 channel |

@@ -99,6 +99,13 @@ try {
   await page.getByText('AI가 구현을 맡을수록 사람은', { exact: false }).waitFor();
   await page.screenshot({ path: path.join(output, 'detail-concise-320.png'), fullPage: true });
   assert.equal(await page.getByRole('tab', { name: '핵심만 요약', exact: true }).getAttribute('aria-selected'), 'true', 'Cached concise density switches immediately');
+  await page.getByRole('button', { name: '더보기', exact: true }).click();
+  const noteAction = page.getByRole('button', { name: 'Obsidian 노트 복사', exact: true });
+  await noteAction.waitFor();
+  const noteBounds = await noteAction.boundingBox();
+  assert.ok(noteBounds && noteBounds.height >= 44, 'Source note action has a 44px touch target');
+  await page.screenshot({ path: path.join(output, 'source-note-menu-320.png'), fullPage: true });
+  await page.getByRole('button', { name: '더보기 닫기', exact: true }).click();
   await page.getByRole('button', { name: '뒤로가기', exact: true }).click();
   await page.getByText('늦게 완료된 요약', { exact: true }).first().waitFor({ timeout: 20000 });
   await page.getByRole('tab', { name: '보관함', exact: true }).click();
@@ -110,7 +117,7 @@ try {
   await page.getByText('35. 확인할 내용', { exact: true }).first().waitFor();
   assert.equal(errors.length, 0, `Browser errors: ${errors.join('; ')}`);
   await writeFile(path.join(output, 'report.json'), JSON.stringify({ viewportWidths: [390, 320], errors, calls, overflow, mockedApi: true, nativeAccessibilityVerified: false }, null, 2));
-  console.log(JSON.stringify({ success: true, output, screenshots: ['home-390.png', 'detail-390.png', 'detail-320.png', 'detail-concise-320.png', 'long-collapsed-320.png'], apiRequests: calls.length }, null, 2));
+  console.log(JSON.stringify({ success: true, output, screenshots: ['home-390.png', 'detail-390.png', 'detail-320.png', 'detail-concise-320.png', 'source-note-menu-320.png', 'long-collapsed-320.png'], apiRequests: calls.length }, null, 2));
 } catch (error) {
   if (page) {
     await page.screenshot({ path: path.join(output, 'failure.png'), fullPage: true });

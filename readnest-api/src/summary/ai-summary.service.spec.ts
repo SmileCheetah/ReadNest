@@ -8,6 +8,7 @@ import {
 } from './ai-summary.service';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { ConfigService } from '@nestjs/config';
 
 describe('validateSummaryMarkdown', () => {
   const sharedFixtures = JSON.parse(
@@ -38,6 +39,26 @@ describe('validateSummaryMarkdown', () => {
 });
 
 describe('AiSummaryService', () => {
+  it.each([undefined, '', '   '])(
+    'defaults an unset model (%s) to GPT-6 Luna',
+    (value) => {
+      const service = new AiSummaryService(
+        new ConfigService({ OPENAI_MODEL: value }),
+      );
+      expect((service as unknown as { model: string }).model).toBe(
+        'gpt-6-luna',
+      );
+    },
+  );
+
+  it('honors an explicitly configured model', () => {
+    const service = new AiSummaryService(
+      new ConfigService({ OPENAI_MODEL: ' custom-model ' }),
+    );
+    expect((service as unknown as { model: string }).model).toBe(
+      'custom-model',
+    );
+  });
   const input = {
     url: 'https://example.com/article',
     title: '원문 제목',
@@ -47,7 +68,7 @@ describe('AiSummaryService', () => {
   function createService(responseText: string) {
     const service = Object.create(AiSummaryService.prototype);
     service.logger = { warn: jest.fn() };
-    service.model = 'gpt-5.6-luna';
+    service.model = 'gpt-6-luna';
     service.client = {
       responses: {
         create: jest.fn().mockResolvedValue({ output_text: responseText }),
@@ -62,7 +83,7 @@ describe('AiSummaryService', () => {
     const create = service.client.responses.create;
 
     expect(create).toHaveBeenCalledWith({
-      model: 'gpt-5.6-luna',
+      model: 'gpt-6-luna',
       input: buildSummaryPrompt('원문 내용이다.'),
     });
     expect(result.summary).toBe('# 요약 제목\n\n원문에 충실한 요약이다.');
@@ -133,7 +154,7 @@ describe('AiSummaryService', () => {
     await service.summarize({ ...input, density: 'DETAILED' });
 
     expect(service.client.responses.create).toHaveBeenCalledWith({
-      model: 'gpt-5.6-luna',
+      model: 'gpt-6-luna',
       input: buildSummaryPrompt(input.text, 'DETAILED'),
     });
   });
@@ -193,7 +214,7 @@ describe('AiSummaryService', () => {
           create: jest.fn().mockRejectedValue(new Error(`OpenAI ${kind}`)),
         },
       };
-      service.model = 'gpt-5.6-luna';
+      service.model = 'gpt-6-luna';
 
       await expect(service.summarize(input)).rejects.toEqual(
         expect.objectContaining({

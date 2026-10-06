@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "engineVersion": "4.1.0",
   "engineRevision": "sha256:f563a15b158ecef506f213c45ef54a71b34b4b1410c92529673b97ab34840772",
-  "generatedAt": "2026-09-29T16:08:13.741Z",
+  "generatedAt": "2026-10-06T17:33:54.028Z",
   "selection": {
     "agent": "codex",
     "grammar": "editorial-reading",

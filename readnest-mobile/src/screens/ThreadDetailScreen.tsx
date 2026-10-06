@@ -16,10 +16,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
-import type {
-  SavedThread,
-  SummaryDensity,
-} from "../data/mockThreads";
+import type { SavedThread, SummaryDensity } from "../data/mockThreads";
 import { colors, radius, spacing } from "../theme/tokens";
 import {
   isSupportedMarkdown,
@@ -31,6 +28,7 @@ import {
   getSummaryPresentation,
 } from "../components/summary/summaryPresentation";
 import { SummaryDensityControl } from "../components/summary/SummaryDensityControl";
+import { buildKnowledgeNote } from "../components/summary/knowledgeNote";
 
 type Props = {
   thread: SavedThread;
@@ -119,9 +117,7 @@ export function ThreadDetailScreen({
             variant.density === selectedDensity &&
             variant.sourceGeneration === thread.resultGeneration,
         );
-  const variantMarkdown = isSupportedMarkdown(
-    selectedVariant?.summaryMarkdown,
-  )
+  const variantMarkdown = isSupportedMarkdown(selectedVariant?.summaryMarkdown)
     ? selectedVariant.summaryMarkdown
     : null;
   const summaryMarkdown = variantMarkdown ?? standardSummaryMarkdown;
@@ -288,7 +284,7 @@ export function ThreadDetailScreen({
     );
     if (!variant) void requestDensity(density);
   };
-  const copy = async () => {
+  const copy = async (format: "summary" | "note" = "summary") => {
     if (copyBusy.current || !summaryMarkdown) return;
     copyBusy.current = true;
     const request = ++copySequence.current;
@@ -296,14 +292,25 @@ export function ThreadDetailScreen({
     setCopyState("copying");
     try {
       await Clipboard.setStringAsync(
-        [summaryMarkdown, originalUrl ? `원문: ${originalUrl}` : null]
-          .filter(Boolean)
-          .join("\n\n"),
+        format === "note"
+          ? buildKnowledgeNote(
+              thread,
+              summaryMarkdown,
+              variantMarkdown ? selectedDensity : "STANDARD",
+              variantMarkdown
+                ? selectedVariant?.generatedAt
+                : thread.generatedAt,
+            )
+          : [summaryMarkdown, originalUrl ? `원문: ${originalUrl}` : null]
+              .filter(Boolean)
+              .join("\n\n"),
       );
       if (request !== copySequence.current) return;
       setCopyState("copied");
       AccessibilityInfo.announceForAccessibility(
-        "요약과 원문 링크를 복사했습니다.",
+        format === "note"
+          ? "출처가 포함된 노트를 복사했습니다. Obsidian의 빈 노트에 붙여넣으세요."
+          : "요약과 원문 링크를 복사했습니다.",
       );
       copyTimer.current = setTimeout(() => setCopyState("idle"), 2000);
     } catch {
@@ -314,7 +321,9 @@ export function ThreadDetailScreen({
       );
       Alert.alert(
         "복사하지 못했어요",
-        "‘다시 복사’를 눌러 한 번 더 시도해 주세요.",
+        format === "note"
+          ? "더보기에서 ‘Obsidian 노트 복사’를 다시 눌러 주세요."
+          : "‘다시 복사’를 눌러 한 번 더 시도해 주세요.",
       );
     } finally {
       if (request === copySequence.current) copyBusy.current = false;
@@ -517,10 +526,7 @@ export function ThreadDetailScreen({
                 onSelect={selectDensity}
                 onRetry={() =>
                   void requestDensity(
-                    selectedDensity as Exclude<
-                      SummaryDensity,
-                      "STANDARD"
-                    >,
+                    selectedDensity as Exclude<SummaryDensity, "STANDARD">,
                   )
                 }
               />
@@ -686,6 +692,22 @@ export function ThreadDetailScreen({
                   <Text style={styles.menuText}>요약 공유</Text>
                 </Pressable>
               ) : null}
+              {summaryMarkdown ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Obsidian 노트 복사"
+                  accessibilityHint="출처와 현재 요약을 복사합니다. Obsidian의 빈 노트에 붙여넣으세요."
+                  accessibilityState={{ disabled: copyState === "copying" }}
+                  disabled={copyState === "copying"}
+                  style={styles.menuItem}
+                  onPress={() => choose(() => void copy("note"))}
+                >
+                  <Text style={styles.menuText}>Obsidian 노트 복사</Text>
+                  <Text style={styles.noteHint}>
+                    출처 포함 · 빈 노트에 붙여넣기
+                  </Text>
+                </Pressable>
+              ) : null}
               <Pressable
                 accessibilityRole="button"
                 style={styles.menuItem}
@@ -729,6 +751,7 @@ export function ThreadDetailScreen({
 }
 
 const styles = StyleSheet.create({
+  noteHint: { color: colors.muted, fontSize: 13, lineHeight: 20 },
   root: { flex: 1, backgroundColor: colors.canvas },
   screen: { flex: 1 },
   appbar: {
