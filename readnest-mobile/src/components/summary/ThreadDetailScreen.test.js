@@ -157,6 +157,52 @@ it("marks read only after a valid document is displayed and only once per entry"
   expect(callbacks.onMarkReadOnOpen).toHaveBeenCalledTimes(1);
 });
 
+it("does not mark a document read while hidden behind the topic picker", async () => {
+  const callbacks = props();
+  const tree = await render(
+    React.createElement(ThreadDetailScreen, { ...callbacks, active: false }),
+  );
+  expect(callbacks.onMarkReadOnOpen).not.toHaveBeenCalled();
+  await act(async () =>
+    tree.update(
+      React.createElement(ThreadDetailScreen, { ...callbacks, active: true }),
+    ),
+  );
+  expect(callbacks.onMarkReadOnOpen).toHaveBeenCalledTimes(1);
+});
+
+it("opens topic management explicitly without changing summary content", async () => {
+  const onManageTopics = jest.fn();
+  const tree = await render(
+    React.createElement(ThreadDetailScreen, { ...props(), onManageTopics }),
+  );
+  await act(async () => button(tree, "더보기").props.onPress());
+  await act(async () => button(tree, "주제에 추가").props.onPress());
+  expect(onManageTopics).toHaveBeenCalledWith(article);
+  expect(text(tree)).toContain("이유를 설명합니다.");
+});
+
+it("cancels menu focus restoration when a topic picker hides the detail", async () => {
+  const callbacks = { ...props(), onManageTopics: jest.fn() };
+  const tree = await render(React.createElement(ThreadDetailScreen, callbacks));
+  await act(async () => button(tree, "더보기").props.onPress());
+  await act(async () => jest.runOnlyPendingTimers());
+  const schedule = jest.spyOn(global, "setTimeout");
+  const cancel = jest.spyOn(global, "clearTimeout");
+  await act(async () => button(tree, "주제에 추가").props.onPress());
+  const focusTimerIndex = schedule.mock.calls.findIndex(
+    ([, delay]) => delay === 100,
+  );
+  expect(focusTimerIndex).toBeGreaterThanOrEqual(0);
+  const focusTimer = schedule.mock.results[focusTimerIndex].value;
+  await act(async () =>
+    tree.update(
+      React.createElement(ThreadDetailScreen, { ...callbacks, active: false }),
+    ),
+  );
+  expect(cancel).toHaveBeenCalledWith(focusTimer);
+});
+
 it("keeps last successful Markdown visible during regeneration and after a failed attempt", async () => {
   const callbacks = props({ ...article, processStatus: "SUMMARIZING" });
   const tree = await render(React.createElement(ThreadDetailScreen, callbacks));

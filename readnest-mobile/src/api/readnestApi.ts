@@ -117,7 +117,7 @@ export type ApiHome = {
 
 type RequestOptions = {
   token?: string;
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   signal?: AbortSignal;
   idempotencyKey?: string;
@@ -172,7 +172,7 @@ export type ListArticlesOptions = {
   signal?: AbortSignal;
 };
 
-async function request<T>(
+export async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
@@ -220,7 +220,7 @@ async function request<T>(
       throw new ApiError(
         message,
         response.status,
-        data?.errorCode,
+        data?.errorCode ?? data?.code,
         Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
           ? retryAfterSeconds
           : undefined,

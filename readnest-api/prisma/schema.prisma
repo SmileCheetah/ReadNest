@@ -45,14 +45,15 @@ enum SummaryDensity {
 }
 
 model User {
-  id           String         @id @default(cuid())
-  email        String         @unique
-  passwordHash String
-  nickname     String
-  articles     SavedArticle[]
-  threadGroups ThreadGroup[]
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id              String           @id @default(cuid())
+  email           String           @unique
+  passwordHash    String
+  nickname        String
+  articles        SavedArticle[]
+  threadGroups    ThreadGroup[]
+  knowledgeTopics KnowledgeTopic[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   @@map("users")
 }
@@ -93,12 +94,43 @@ model SavedArticle {
   threadParts          ThreadPart[]
   summaryTasks         SummaryTask[]
   summaryVariants      SummaryVariant[]
+  topicArticles        TopicArticle[]
 
   @@unique([userId, normalizedUrl])
   @@index([userId, savedAt])
   @@index([userId, processStatus])
   @@index([userId, readStatus])
   @@map("saved_articles")
+}
+
+model KnowledgeTopic {
+  id          String         @id @default(cuid())
+  userId      String
+  name        String         @db.VarChar(80)
+  // Hash of the NFKC/case/whitespace-normalized name, independent of DB collation.
+  nameKey     String         @db.Char(64)
+  description String?        @db.Text
+  revision    Int            @default(1)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  articles    TopicArticle[]
+
+  @@unique([userId, nameKey])
+  @@index([userId, createdAt, id])
+  @@map("knowledge_topics")
+}
+
+model TopicArticle {
+  topicId   String
+  articleId String
+  createdAt DateTime       @default(now())
+  topic     KnowledgeTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  article   SavedArticle   @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@id([topicId, articleId])
+  @@index([articleId, topicId])
+  @@map("topic_articles")
 }
 
 model SummaryVariant {

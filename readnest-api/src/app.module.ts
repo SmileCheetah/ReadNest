@@ -8,6 +8,7 @@ import { ArticlesModule } from './articles/articles.module';
 import { AuthModule } from './auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SummaryModule } from './summary/summary.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 import {
   AccountDeletionController,
   PrivacyController,
@@ -64,6 +65,7 @@ import {
     AuthModule,
     SummaryModule,
     ArticlesModule,
+    KnowledgeModule,
   ],
   controllers: [AppController, PrivacyController, AccountDeletionController],
   providers: [AppService],

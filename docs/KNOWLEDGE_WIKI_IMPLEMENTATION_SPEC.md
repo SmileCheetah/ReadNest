@@ -2,7 +2,7 @@
 
 저장한 글을 주제로 묶고, 출처를 확인할 수 있는 Wiki를 편집하며, 선택한 자료에 질문하는 흐름을 만든다. 기존 글 상세·요약·밀도 선택은 그대로 유지한다. 원문과 AI 종합, 사용자가 작성한 내용을 구분해 다시 찾기와 재사용을 돕는다.
 
-2026-10-07 기준 **후속 설계안**이다. 현재 구현된 것은 GPT-6 Luna 전환과 Obsidian 노트 복사이며, 아래 모델·API·화면은 아직 존재하지 않는다. 단계별 검증을 통과한 기능만 구현 완료로 전환한다. 상위 계획은 [Threads 지식 Wiki 개선 계획](KNOWLEDGE_WIKI_PLAN.md), 성능 과제는 [요약 지연 개선 계획](SUMMARY_LATENCY_INVESTIGATION.md)을 따른다.
+2026-10-07 기준 **1단계 수동 주제·저장글 연결은 구현**, 개별 글 직접 연결과 2·3단계 Wiki·질의응답은 후속 설계다. GPT-6 Luna 전환과 Obsidian 노트 복사도 유지한다. 상위 계획은 [Threads 지식 Wiki 개선 계획](KNOWLEDGE_WIKI_PLAN.md), 성능 과제는 [요약 지연 개선 계획](SUMMARY_LATENCY_INVESTIGATION.md)을 따른다.
 
 ## 제품 흐름과 범위
 
@@ -44,9 +44,9 @@
 | KnowledgeTopic | id, userId, name, description, revision, createdAt, updatedAt |
 | TopicArticle | topicId, articleId, createdAt; topicId와 articleId 조합 unique |
 
-주제 이름은 trim 후 공백 이름을 거부한다. 이름 80자·설명 2,000자는 **초기 리소스 제한 제안**이며 DTO와 화면에서 같은 단위를 사용한다. 제목을 조용히 자르지 않는다. 같은 사용자의 정규화된 주제 이름 중복은 기존 주제로 안내한다. 다른 사용자의 동일 이름은 허용한다.
+이름 80자·설명 2,000자를 Unicode 코드포인트 단위로 제한하며 제목을 조용히 자르지 않는다. 이름은 NFC와 연속 공백 정규화 후 검사하고, 중복 비교에는 NFKC·소문자화한 이름의 SHA-256 `nameKey`를 사용한다. 비어 있거나 보이지 않는 문자만 있는 이름과 제어 문자를 거부하되 정상 emoji 조합은 허용한다. 같은 사용자의 중복 이름은 409와 기존 주제 ID를 반환한다. 다른 사용자의 동일 이름은 허용한다.
 
-| 제안 API | 의미 |
+| 구현 API | 의미 |
 | --- | --- |
 | GET /api/knowledge/topics | 소유자의 주제 목록, cursor pagination |
 | POST /api/knowledge/topics | 주제 생성 |
@@ -56,10 +56,17 @@
 | GET /api/knowledge/topics/:id/articles | 주제 안의 글 목록, 검색·cursor pagination |
 | PUT /api/knowledge/topics/:id/articles/:articleId | 글 연결; 반복 요청은 동일 결과 |
 | DELETE /api/knowledge/topics/:id/articles/:articleId | 연결 해제; 반복 요청은 안전하게 처리 |
+| GET /api/knowledge/articles/:articleId/topics | 저장글이 연결된 소유자의 주제 목록, 검색·cursor pagination |
 
-목록 응답은 `items`, `nextCursor`를 사용한다. cursor는 소유자·주제·검색 조건에 묶어 다른 조회 범위에 재사용하지 못하게 한다. 연결 양쪽의 userId를 트랜잭션 안에서 검증한다. 연결 변경 시 topic revision을 증가시킨다. 타인 항목과 없는 항목 모두 404로 처리한다.
+목록 응답은 `items`, `nextCursor`를 사용하며 기본 30개·최대 100개를 반환한다. 주제는 생성 시각·ID 내림차순, 글은 저장 시각·ID 내림차순이다. 서명된 cursor는 소유자·조회 종류·주제/글·검색 조건에 묶어 다른 범위에 재사용하지 못하게 한다. 글 목록은 미리보기만 반환하며 수집 원문·요약 전문·내부 오류 로그는 반환하지 않는다.
+
+주제 DTO는 `id, name, description, revision, articleCount, createdAt, updatedAt`이다. 모든 라우트는 기존 JWT guard를 사용한다. 쓰기는 소유자 행을 먼저 잠그고 트랜잭션 안에서 연결 양쪽의 소유자를 검증한다. 연결이 실제 바뀔 때만 revision을 증가시키고 반복 연결·해제는 증가시키지 않는다. 앱의 저장글 삭제 경로에서도 연결된 주제 revision을 증가시킨 후 FK cascade로 연결을 제거한다. 타인 항목과 없는 항목 모두 404로 처리한다.
 
 완료 기준: 주제 생성·수정·삭제·복수 주제 연결·연결 해제·재접속 후 복원, 중복 클릭, 페이지네이션, 계정 전환 시 이전 데이터 제거, 타인 글 연결 거부를 자동 테스트한다. 이 단계에는 AI 호출이 없다.
+
+구현 파일은 Backend `src/knowledge/`, Prisma 모델·migration, 기존 article 삭제 경로와 Frontend `knowledgeApi.ts`, `useKnowledgeLibrary.ts`, `KnowledgeScreen.tsx`다. `App.tsx`에서 보관함과 상세 메뉴의 진입·복귀만 연결한다. 계정 토큰으로 화면 상태를 격리하고 늦은 목록 응답은 조회 범위가 달라지면 폐기한다. 숨겨진 상세 화면은 읽음 처리와 Android 뒤로가기 이벤트를 소비하지 않는다.
+
+실제 DB·HTTP 검증은 `READNEST_LOCAL_KNOWLEDGE_QA=1 node scripts/verify-knowledge-topics.cjs`로 재실행한다. 스크립트는 명시적 플래그와 로컬 MySQL `localhost/127.0.0.1:3307/readnest`만 허용한다. 실행마다 별도의 합성 사용자·자료를 생성하고 자신이 만든 사용자 ID만 정리하며, Redis worker나 모델을 실행하지 않는다. guard의 신원은 합성이므로 실제 JWT 서명·로그인 검증과 구분한다.
 
 ### 개별 글끼리 연결
 
@@ -190,4 +197,4 @@ Wiki와 기본 요약은 queue를 분리하되 같은 모델 계정의 rate limi
 
 ## 후속 결정이 필요한 항목
 
-첫 구현 우선순위는 주제·연결을 권장한다. 전체 보관함 검색을 먼저 제공할지, Wiki 문서 편집을 먼저 제공할지는 사용자 피드백으로 조정한다. 운영 호출 예산, 자료 보관 범위, 자동 추천의 수용 기준은 출시 전에 확정한다. 확정 전에는 문서의 제안값을 운영 설정으로 간주하지 않는다.
+수동 주제·저장글 연결 다음에는 개별 글 직접 연결 또는 출처 스냅샷 기반 Wiki 초안을 진행할 수 있다. 전체 보관함 검색과 Wiki 편집의 우선순위는 사용자 피드백으로 조정한다. 운영 호출 예산, 자료 보관 범위, 자동 추천의 수용 기준은 출시 전에 확정한다. 확정 전에는 후속 단계의 제안값을 운영 설정으로 간주하지 않는다.

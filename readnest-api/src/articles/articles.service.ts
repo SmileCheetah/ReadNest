@@ -366,12 +366,24 @@ export class ArticlesService {
   }
 
   async remove(userId: string, id: string) {
-    await this.ensureOwnedArticle(userId, id);
-
-    await this.prisma.savedArticle.delete({
-      where: {
-        id,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      // Match the knowledge write lock order so source deletion and membership
+      // edits cannot race and silently invalidate a topic's revision.
+      const users = await tx.$queryRaw<
+        Array<{ id: string }>
+      >`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`;
+      if (!users.length)
+        throw new UnauthorizedException('로그인이 필요합니다.');
+      const articles = await tx.$queryRaw<
+        Array<{ id: string }>
+      >`SELECT id FROM saved_articles WHERE id = ${id} AND userId = ${userId} FOR UPDATE`;
+      if (!articles.length)
+        throw new NotFoundException('저장한 글을 찾을 수 없습니다.');
+      await tx.knowledgeTopic.updateMany({
+        where: { userId, articles: { some: { articleId: id } } },
+        data: { revision: { increment: 1 } },
+      });
+      await tx.savedArticle.delete({ where: { id, userId } });
     });
 
     return {

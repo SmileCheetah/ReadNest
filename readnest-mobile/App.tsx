@@ -28,6 +28,7 @@ import { AppHeader } from "./src/components/AppHeader";
 import { BottomNav } from "./src/components/BottomNav";
 import { ThreadCard } from "./src/components/ThreadCard";
 import { ThreadDetailScreen } from "./src/screens/ThreadDetailScreen";
+import { KnowledgeScreen } from "./src/screens/KnowledgeScreen";
 import { SavedThread } from "./src/data/mockThreads";
 import { colors, radius, shadow, spacing } from "./src/theme/tokens";
 
@@ -53,6 +54,13 @@ export default function App() {
   const [screen, setScreen] = useState<ScreenName>("home");
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [user, setUser] = useState<ApiUser | null>(null);
+  const [knowledgeRoute, setKnowledgeRoute] = useState<{
+    ownerToken: string;
+  } | null>(null);
+  const [topicPickerRoute, setTopicPickerRoute] = useState<{
+    ownerToken: string;
+    article: SavedThread;
+  } | null>(null);
   const [activeArchiveTab, setActiveArchiveTab] = useState("전체 기간");
   const [archiveSearch, setArchiveSearch] = useState("");
   const [archiveReadFilter, setArchiveReadFilter] =
@@ -259,6 +267,15 @@ export default function App() {
     await tokenStorage.clear();
   };
   const selected = library.selectedThread;
+  const knowledge =
+    knowledgeRoute?.ownerToken === accessToken ? knowledgeRoute : null;
+  const topicPicker =
+    topicPickerRoute?.ownerToken === accessToken ? topicPickerRoute : null;
+  const knowledgeVisible = !!knowledge && !selected && !topicPicker;
+  useEffect(() => {
+    setKnowledgeRoute(null);
+    setTopicPickerRoute(null);
+  }, [accessToken]);
   const showUnread = () => {
     setScreen("archive");
     setArchiveReadFilter("UNREAD");
@@ -307,10 +324,13 @@ export default function App() {
         ) : (
           <View style={styles.app}>
             <View
-              style={[styles.app, selected && styles.hiddenScreen]}
-              accessibilityElementsHidden={!!selected}
+              style={[
+                styles.app,
+                (selected || knowledge) && styles.hiddenScreen,
+              ]}
+              accessibilityElementsHidden={!!selected || !!knowledge}
               importantForAccessibility={
-                selected ? "no-hide-descendants" : "auto"
+                selected || knowledge ? "no-hide-descendants" : "auto"
               }
             >
               <AppHeader />
@@ -335,6 +355,9 @@ export default function App() {
                   onRefresh={() => void library.refreshArchive()}
                   onLoadMore={() => void library.refreshArchive(true)}
                   onOpenThread={(thread) => void library.open(thread)}
+                  onOpenKnowledge={() =>
+                    setKnowledgeRoute({ ownerToken: accessToken })
+                  }
                 />
               ) : (
                 <ScrollView
@@ -368,32 +391,73 @@ export default function App() {
               )}
               <BottomNav current={screen} onChange={setScreen} />
             </View>
+            {knowledge ? (
+              <View
+                style={[styles.app, !knowledgeVisible && styles.hiddenScreen]}
+                accessibilityElementsHidden={!knowledgeVisible}
+                importantForAccessibility={
+                  knowledgeVisible ? "auto" : "no-hide-descendants"
+                }
+              >
+                <KnowledgeScreen
+                  key={accessToken}
+                  token={accessToken}
+                  active={knowledgeVisible}
+                  onBack={() => setKnowledgeRoute(null)}
+                  onOpenThread={(thread) => void library.open(thread)}
+                />
+              </View>
+            ) : null}
             {selected ? (
-              <ThreadDetailScreen
-                key={selected.id}
-                thread={selected}
-                onBack={library.close}
-                onMarkReadOnOpen={(thread) =>
-                  library.changeRead(thread, "READ", true)
+              <View
+                style={[styles.app, !!topicPicker && styles.hiddenScreen]}
+                accessibilityElementsHidden={!!topicPicker}
+                importantForAccessibility={
+                  topicPicker ? "no-hide-descendants" : "auto"
                 }
-                onToggleReadStatus={(thread) =>
-                  void changeRead(
-                    thread,
-                    thread.readStatus === "READ" ? "UNREAD" : "READ",
-                  )
-                }
-                onMarkReadLater={(thread) =>
-                  void changeRead(thread, "READ_LATER")
-                }
-                onRetrySummary={retry}
-                onRequestSummaryDensity={library.requestSummaryDensity}
-                onShareSummary={(thread, markdown) =>
-                  void share(thread, markdown)
-                }
-                onDelete={remove}
-                loadingDetail={library.detailLoading}
-                detailError={library.detailError}
-                onRefresh={() => void library.fetchDetail(selected.id, true)}
+              >
+                <ThreadDetailScreen
+                  key={selected.id}
+                  thread={selected}
+                  onBack={library.close}
+                  active={!topicPicker}
+                  onManageTopics={(thread) =>
+                    setTopicPickerRoute({
+                      ownerToken: accessToken,
+                      article: thread,
+                    })
+                  }
+                  onMarkReadOnOpen={(thread) =>
+                    library.changeRead(thread, "READ", true)
+                  }
+                  onToggleReadStatus={(thread) =>
+                    void changeRead(
+                      thread,
+                      thread.readStatus === "READ" ? "UNREAD" : "READ",
+                    )
+                  }
+                  onMarkReadLater={(thread) =>
+                    void changeRead(thread, "READ_LATER")
+                  }
+                  onRetrySummary={retry}
+                  onRequestSummaryDensity={library.requestSummaryDensity}
+                  onShareSummary={(thread, markdown) =>
+                    void share(thread, markdown)
+                  }
+                  onDelete={remove}
+                  loadingDetail={library.detailLoading}
+                  detailError={library.detailError}
+                  onRefresh={() => void library.fetchDetail(selected.id, true)}
+                />
+              </View>
+            ) : null}
+            {topicPicker ? (
+              <KnowledgeScreen
+                key={`${accessToken}:${topicPicker.article.id}`}
+                token={accessToken}
+                initialArticle={topicPicker.article}
+                onBack={() => setTopicPickerRoute(null)}
+                onOpenThread={(thread) => void library.open(thread)}
               />
             ) : null}
           </View>
@@ -826,6 +890,7 @@ function ArchiveScreen({
   onRefresh,
   onLoadMore,
   onOpenThread,
+  onOpenKnowledge,
 }: {
   activeTab: string;
   onChangeTab: (tab: string) => void;
@@ -841,6 +906,7 @@ function ArchiveScreen({
   onRefresh: () => void;
   onLoadMore: () => void;
   onOpenThread: (thread: SavedThread) => void;
+  onOpenKnowledge: () => void;
 }) {
   const filters: Array<{ label: string; value: ArchiveReadFilter }> = [
     { label: "전체", value: "ALL" },
@@ -873,6 +939,24 @@ function ArchiveScreen({
           <Text style={styles.homeDescription}>
             저장한 생각을 다시 찾아보세요.
           </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="주제로 모아보기"
+            style={styles.topicEntry}
+            onPress={onOpenKnowledge}
+          >
+            <Ionicons
+              name="folder-open-outline"
+              size={20}
+              color={colors.primaryPressed}
+            />
+            <Text style={styles.textButtonText}>주제로 모아보기</Text>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={colors.primaryPressed}
+            />
+          </Pressable>
           <Text style={styles.inputLabel}>저장글 검색</Text>
           <View style={styles.searchBox}>
             <Ionicons name="search-outline" size={18} color={colors.muted} />
@@ -1099,6 +1183,17 @@ function SettingRow({
 
 const styles = StyleSheet.create({
   hiddenScreen: { display: "none" },
+  topicEntry: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.blueSoft,
+  },
   flexContent: { flex: 1 },
   homeHeading: {
     flexDirection: "row",

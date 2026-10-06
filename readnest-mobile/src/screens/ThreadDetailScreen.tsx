@@ -3,6 +3,7 @@ import {
   AccessibilityInfo,
   ActivityIndicator,
   Alert,
+  BackHandler,
   findNodeHandle,
   Linking,
   Modal,
@@ -33,6 +34,8 @@ import { buildKnowledgeNote } from "../components/summary/knowledgeNote";
 type Props = {
   thread: SavedThread;
   onBack: () => void;
+  active?: boolean;
+  onManageTopics?: (thread: SavedThread) => void;
   onMarkReadOnOpen: (thread: SavedThread) => void | Promise<void>;
   onToggleReadStatus: (thread: SavedThread) => void;
   onMarkReadLater: (thread: SavedThread) => void;
@@ -61,6 +64,8 @@ function focusElement(view: View | null) {
 export function ThreadDetailScreen({
   thread,
   onBack,
+  active = true,
+  onManageTopics,
   onMarkReadOnOpen,
   onToggleReadStatus,
   onMarkReadLater,
@@ -170,10 +175,23 @@ export function ThreadDetailScreen({
   useEffect(() => {
     if (readEntry.current.id !== thread.id)
       readEntry.current = { id: thread.id, consumed: false };
-    if (!summaryMarkdown || readEntry.current.consumed) return;
+    if (!active || !summaryMarkdown || readEntry.current.consumed) return;
     readEntry.current.consumed = true;
     if (thread.readStatus === "UNREAD") void onMarkReadOnOpen(thread);
-  }, [onMarkReadOnOpen, summaryMarkdown, thread.id, thread.readStatus]);
+  }, [active, onMarkReadOnOpen, summaryMarkdown, thread.id, thread.readStatus]);
+
+  useEffect(() => {
+    if (!active) return;
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        if (menuOpen) setMenuOpen(false);
+        else onBack();
+        return true;
+      },
+    );
+    return () => subscription.remove();
+  }, [active, menuOpen, onBack]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
@@ -194,6 +212,10 @@ export function ThreadDetailScreen({
   }, [thread.id, summaryMarkdown]);
 
   useEffect(() => {
+    if (!active) {
+      previousMenuOpen.current = false;
+      return;
+    }
     if (!menuOpen && !previousMenuOpen.current) return;
     previousMenuOpen.current = menuOpen;
     const timer = setTimeout(
@@ -204,7 +226,7 @@ export function ThreadDetailScreen({
       100,
     );
     return () => clearTimeout(timer);
-  }, [menuOpen]);
+  }, [active, menuOpen]);
 
   useEffect(() => {
     const seconds = Math.max(0, thread.retryAfterSeconds ?? 0);
@@ -663,8 +685,19 @@ export function ThreadDetailScreen({
               </Pressable>
             </View>
             <ScrollView>
+              {onManageTopics ? (
+                <Pressable
+                  ref={menuFirstItemRef}
+                  accessibilityRole="button"
+                  accessibilityLabel="주제에 추가"
+                  style={styles.menuItem}
+                  onPress={() => choose(() => onManageTopics(thread))}
+                >
+                  <Text style={styles.menuText}>주제에 추가</Text>
+                </Pressable>
+              ) : null}
               <Pressable
-                ref={menuFirstItemRef}
+                ref={onManageTopics ? undefined : menuFirstItemRef}
                 accessibilityRole="button"
                 style={styles.menuItem}
                 onPress={() => choose(() => markManually(onToggleReadStatus))}
