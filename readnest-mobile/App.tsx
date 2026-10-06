@@ -672,9 +672,6 @@ export function HomeScreen({
   useEffect(() => {
     if (pendingSharedUrl) setCaptureOpen(true);
   }, [pendingSharedUrl]);
-  useEffect(() => {
-    if (saveNotice) setCaptureOpen(false);
-  }, [saveNotice]);
   const captureVisible = captureOpen;
   const processing = threads.filter(isProcessing);
   const failed = threads.filter(
