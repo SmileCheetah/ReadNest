@@ -15,6 +15,7 @@ import { SummaryJobData, SummaryJobService } from './summary-job.service';
 import { SummaryGenerationError, summaryFailure } from './summary-errors';
 import { ThreadDetectionService } from './thread-detection.service';
 import { summaryPreview } from '../articles/utils/summary-preview';
+import { AutoConnectionsService } from '../knowledge/auto-connections.service';
 
 type Checkpoint = { summary: SummaryResult; source: ExtractedContent };
 
@@ -26,6 +27,7 @@ export class SummaryProcessor extends WorkerHost {
     private readonly contentExtractor: ContentExtractorService,
     private readonly aiSummaryService: AiSummaryService,
     private readonly threadDetectionService: ThreadDetectionService,
+    private readonly autoConnections: AutoConnectionsService,
   ) {
     super();
   }
@@ -119,6 +121,11 @@ export class SummaryProcessor extends WorkerHost {
         this.logger.warn(
           `Summary enrichment failed: article=${article.id} generation=${lease.generation}`,
         );
+      }
+      try {
+        await this.autoConnections.schedule(article.id);
+      } catch {
+        this.logger.warn(`Connection scheduling failed: article=${article.id}`);
       }
       this.logger.log(
         `Summary completed: article=${article.id} generation=${lease.generation} elapsedMs=${Date.now() - started}`,

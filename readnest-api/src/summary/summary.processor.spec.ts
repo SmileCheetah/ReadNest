@@ -39,11 +39,13 @@ function setup() {
   };
   const ai = { summarize: jest.fn().mockResolvedValue(result) };
   const detection = { detectAndLink: jest.fn() };
+  const autoConnections = { schedule: jest.fn().mockResolvedValue(true) };
   const processor = new SummaryProcessor(
     jobs as never,
     extractor as never,
     ai as never,
     detection as never,
+    autoConnections as never,
   );
   const job = { data: { articleId: 'a', generation: 1, taskId: 't' } } as never;
   return {
@@ -51,6 +53,7 @@ function setup() {
     extractor,
     ai,
     detection,
+    autoConnections,
     processor,
     job,
     source,
@@ -76,6 +79,7 @@ describe('summary processing integrity', () => {
         summaryPreview: '중요한 근거가 담긴 본문입니다.',
       }),
     );
+    expect(s.autoConnections.schedule).toHaveBeenCalledWith('a');
   });
   it('does not invoke AI without usable source', async () => {
     const s = setup();

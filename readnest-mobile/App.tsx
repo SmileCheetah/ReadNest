@@ -29,6 +29,7 @@ import { BottomNav } from "./src/components/BottomNav";
 import { ThreadCard } from "./src/components/ThreadCard";
 import { ThreadDetailScreen } from "./src/screens/ThreadDetailScreen";
 import { KnowledgeScreen } from "./src/screens/KnowledgeScreen";
+import { KnowledgeHubScreen } from "./src/screens/KnowledgeHubScreen";
 import { SavedThread } from "./src/data/mockThreads";
 import { colors, radius, shadow, spacing } from "./src/theme/tokens";
 
@@ -399,7 +400,7 @@ export default function App() {
                   knowledgeVisible ? "auto" : "no-hide-descendants"
                 }
               >
-                <KnowledgeScreen
+                <KnowledgeHubScreen
                   key={accessToken}
                   token={accessToken}
                   active={knowledgeVisible}
@@ -938,16 +939,16 @@ function ArchiveScreen({
           </Text>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="주제로 모아보기"
+            accessibilityLabel="이어지는 생각 보기"
             style={styles.topicEntry}
             onPress={onOpenKnowledge}
           >
             <Ionicons
-              name="folder-open-outline"
+              name="git-network-outline"
               size={20}
               color={colors.primaryPressed}
             />
-            <Text style={styles.textButtonText}>주제로 모아보기</Text>
+            <Text style={styles.textButtonText}>이어지는 생각 보기</Text>
             <Ionicons
               name="chevron-forward"
               size={18}

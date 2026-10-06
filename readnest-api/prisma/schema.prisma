@@ -52,6 +52,7 @@ model User {
   articles        SavedArticle[]
   threadGroups    ThreadGroup[]
   knowledgeTopics KnowledgeTopic[]
+  autoConnections AutoConnection[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
@@ -95,6 +96,9 @@ model SavedArticle {
   summaryTasks         SummaryTask[]
   summaryVariants      SummaryVariant[]
   topicArticles        TopicArticle[]
+  connectionScan       ConnectionScan?
+  connectionsLeft      AutoConnection[] @relation("ConnectionLeft")
+  connectionsRight     AutoConnection[] @relation("ConnectionRight")
 
   @@unique([userId, normalizedUrl])
   @@index([userId, savedAt])
@@ -131,6 +135,42 @@ model TopicArticle {
   @@id([topicId, articleId])
   @@index([articleId, topicId])
   @@map("topic_articles")
+}
+
+model ConnectionScan {
+  articleId        String           @id
+  sourceGeneration Int
+  state            SummaryTaskState @default(PENDING)
+  attempts         Int              @default(0)
+  errorCode        String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  article          SavedArticle     @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([state, updatedAt])
+  @@map("connection_scans")
+}
+
+model AutoConnection {
+  id              String       @id @default(cuid())
+  userId          String
+  leftArticleId   String
+  rightArticleId  String
+  leftGeneration  Int
+  rightGeneration Int
+  relationType    String       @db.VarChar(24)
+  reason          String       @db.VarChar(280)
+  leftEvidence    String       @db.VarChar(180)
+  rightEvidence   String       @db.VarChar(180)
+  createdAt       DateTime     @default(now())
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leftArticle     SavedArticle @relation("ConnectionLeft", fields: [leftArticleId], references: [id], onDelete: Cascade)
+  rightArticle    SavedArticle @relation("ConnectionRight", fields: [rightArticleId], references: [id], onDelete: Cascade)
+
+  @@unique([leftArticleId, rightArticleId])
+  @@index([userId, createdAt])
+  @@index([rightArticleId])
+  @@map("auto_connections")
 }
 
 model SummaryVariant {

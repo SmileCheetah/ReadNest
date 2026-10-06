@@ -12,9 +12,11 @@ import { SUMMARY_VARIANT_QUEUE } from './summary.constants';
 import { SummaryVariantJobService } from './summary-variant-job.service';
 import { SummaryVariantProcessor } from './summary-variant.processor';
 import { SummaryVariantService } from './summary-variant.service';
+import { KnowledgeModule } from '../knowledge/knowledge.module';
 
 @Module({
   imports: [
+    KnowledgeModule,
     BullModule.registerQueue({
       name: SUMMARY_QUEUE,
     }),

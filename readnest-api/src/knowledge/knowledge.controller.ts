@@ -14,6 +14,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthUser } from '../auth/types/auth-user';
 import { KnowledgeService } from './knowledge.service';
+import { AutoConnectionsService } from './auto-connections.service';
 import {
   CreateTopicDto,
   ListTopicsQueryDto,
@@ -23,7 +24,28 @@ import {
 @UseGuards(JwtAuthGuard)
 @Controller('knowledge')
 export class KnowledgeController {
-  constructor(private readonly knowledge: KnowledgeService) {}
+  constructor(
+    private readonly knowledge: KnowledgeService,
+    private readonly connections: AutoConnectionsService,
+  ) {}
+
+  @Get('connections')
+  connectionsList(@CurrentUser() user: AuthUser) {
+    return this.connections.list(user.id);
+  }
+
+  @Post('connections/scan')
+  scanConnections(@CurrentUser() user: AuthUser) {
+    return this.connections.startPending(user.id);
+  }
+
+  @Post('connections/:articleId/retry')
+  retryConnection(
+    @CurrentUser() user: AuthUser,
+    @Param('articleId') articleId: string,
+  ) {
+    return this.connections.retry(user.id, articleId);
+  }
 
   @Get('topics')
   list(@CurrentUser() user: AuthUser, @Query() query: ListTopicsQueryDto) {
