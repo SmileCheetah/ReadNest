@@ -662,18 +662,6 @@ export function HomeScreen({
   onShowUnread,
   onOpenThread,
 }: HomeProps) {
-  const [captureOpen, setCaptureOpen] = useState(false);
-  const initialCaptureDecision = useRef(false);
-  useEffect(() => {
-    if (hasLoaded && !initialCaptureDecision.current) {
-      initialCaptureDecision.current = true;
-      if (!threads.length) setCaptureOpen(true);
-    }
-  }, [hasLoaded, threads.length]);
-  useEffect(() => {
-    if (pendingSharedUrl) setCaptureOpen(true);
-  }, [pendingSharedUrl]);
-  const captureVisible = captureOpen;
   const processing = threads.filter(isProcessing);
   const failed = threads.filter(
     (thread) => thread.processStatus === "SUMMARY_FAILED",
@@ -697,67 +685,44 @@ export function HomeScreen({
   return (
     <View>
       <View style={styles.homeHeading}>
-        <View style={styles.flexContent}>
-          <Text accessibilityRole="header" style={styles.screenTitle}>
-            다시 꺼내 읽는 생각
+        <Text accessibilityRole="header" style={styles.screenTitle}>
+          다시 꺼내 읽는 생각
+        </Text>
+        <Text style={styles.homeDescription}>
+          저장한 글의 핵심부터 가볍게 살펴보세요.
+        </Text>
+      </View>
+      <View style={styles.savePanel}>
+        <Text style={styles.panelTitle}>Threads 링크 저장</Text>
+        <Text style={styles.inputLabel}>게시물 링크</Text>
+        <TextInput
+          value={url}
+          onChangeText={onChangeUrl}
+          placeholder="https://www.threads.com/@..."
+          placeholderTextColor={colors.muted}
+          accessibilityLabel="Threads 게시물 링크"
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+          style={styles.urlInput}
+        />
+        {pendingSharedUrl ? (
+          <Text style={styles.sectionDescription}>
+            공유한 링크를 확인했어요. 저장을 눌러주세요.
           </Text>
-          <Text style={styles.homeDescription}>
-            저장한 글의 핵심부터 가볍게 살펴보세요.
-          </Text>
-        </View>
+        ) : null}
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={
-            captureVisible ? "링크 저장 입력 닫기" : "링크 저장"
-          }
-          accessibilityState={{ expanded: captureVisible }}
-          style={styles.captureToggle}
-          onPress={() => {
-            initialCaptureDecision.current = true;
-            setCaptureOpen((value) => !value);
-          }}
+          accessibilityState={{ disabled: isSaving }}
+          disabled={isSaving}
+          style={[styles.primaryButton, isSaving && styles.disabledControl]}
+          onPress={onSave}
         >
-          <Ionicons
-            name={captureVisible ? "close-outline" : "add-outline"}
-            size={22}
-            color={colors.primary}
-          />
-          <Text style={styles.textButtonText}>링크</Text>
+          <Text style={styles.primaryButtonText}>
+            {isSaving ? "저장 중…" : "링크 저장"}
+          </Text>
         </Pressable>
       </View>
-      {captureVisible ? (
-        <View style={styles.savePanel}>
-          <Text style={styles.panelTitle}>Threads 링크 저장</Text>
-          <Text style={styles.inputLabel}>게시물 링크</Text>
-          <TextInput
-            value={url}
-            onChangeText={onChangeUrl}
-            placeholder="https://www.threads.com/@..."
-            placeholderTextColor={colors.muted}
-            accessibilityLabel="Threads 게시물 링크"
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            style={styles.urlInput}
-          />
-          {pendingSharedUrl ? (
-            <Text style={styles.sectionDescription}>
-              공유한 링크를 확인했어요. 저장을 눌러주세요.
-            </Text>
-          ) : null}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: isSaving }}
-            disabled={isSaving}
-            style={[styles.primaryButton, isSaving && styles.disabledControl]}
-            onPress={onSave}
-          >
-            <Text style={styles.primaryButtonText}>
-              {isSaving ? "저장 중…" : "링크 저장"}
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
       {saveNotice ? (
         <Text accessibilityLiveRegion="polite" style={styles.saveNotice}>
           {saveNotice}
@@ -1192,11 +1157,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     backgroundColor: colors.blueSoft,
   },
-  flexContent: { flex: 1 },
   homeHeading: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: spacing.sm,
     marginBottom: spacing.lg,
   },
   homeDescription: {
@@ -1204,17 +1165,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     marginBottom: spacing.md,
-  },
-  captureToggle: {
-    minHeight: 48,
-    minWidth: 64,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.xs,
-    borderRadius: radius.md,
-    backgroundColor: colors.blueSoft,
-    paddingHorizontal: spacing.sm,
   },
   inputLabel: {
     color: colors.inkSoft,

@@ -83,7 +83,8 @@ try {
   await page.goto(url);
   await page.getByText('AI 시대의 개발자는 판단한다', { exact: true }).first().waitFor();
   assert.equal(await page.getByPlaceholder('이메일').count(), 0, 'Development guest mode skips the login form');
-  assert.equal(await page.getByRole('button', { name: '링크 저장 입력 닫기', exact: true }).count(), 0, 'Existing users start with the capture panel closed');
+  assert.equal(await page.getByRole('textbox', { name: 'Threads 게시물 링크' }).isVisible(), true, 'Link input stays visible for existing users');
+  assert.equal(await page.getByRole('button', { name: '링크 저장 입력 닫기', exact: true }).count(), 0, 'Link input has no collapse control');
   await page.screenshot({ path: path.join(output, 'home-390.png'), fullPage: true });
   await page.getByText('AI 시대의 개발자는 판단한다', { exact: true }).first().click();
   await page.getByText('데이터 구조는 쉽게 바꾸기 어렵다.', { exact: false }).waitFor();

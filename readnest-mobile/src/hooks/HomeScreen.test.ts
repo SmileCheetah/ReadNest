@@ -20,29 +20,30 @@ const render = async (changes = {}) => { await act(async () => { tree = create(c
 const update = async (changes = {}) => { await act(async () => tree.update(createElement(HomeScreen, { ...props, ...changes }))); };
 const hasInput = () => tree.root.findAllByType(TextInput).length > 0;
 
-it("does not treat the initial empty cache as a new user before loading existing articles", async () => {
+it("keeps the link form visible before and after loading existing articles", async () => {
   await render();
-  expect(hasInput()).toBe(false);
+  expect(hasInput()).toBe(true);
   await update({ isLoading: true });
-  expect(hasInput()).toBe(false);
+  expect(hasInput()).toBe(true);
   await update({ hasLoaded: true, threads: [existing] });
-  expect(hasInput()).toBe(false);
+  expect(hasInput()).toBe(true);
 });
 
-it("opens first-time capture only after a successful empty result, not after failure", async () => {
+it("keeps the link form visible after an article-loading failure", async () => {
   await render({ errorMessage: "연결 실패" });
-  expect(hasInput()).toBe(false);
+  expect(hasInput()).toBe(true);
   await update({ hasLoaded: true });
   expect(hasInput()).toBe(true);
 });
 
-it("preserves manual capture and opens incoming shared links", async () => {
+it("never offers a collapse control after saving or receiving a shared link", async () => {
   await render();
-  await act(async () => tree.root.findByProps({ accessibilityLabel: "링크 저장" }).props.onPress());
-  await update({ hasLoaded: true, threads: [existing] });
+  const saveButton = tree.root.findAll((node: any) => node.props.onPress === props.onSave)[0];
+  await act(async () => saveButton.props.onPress());
+  expect(props.onSave).toHaveBeenCalled();
+  await update({ hasLoaded: true, threads: [existing], saveNotice: "저장했어요." });
   expect(hasInput()).toBe(true);
-  await act(async () => tree.root.findByProps({ accessibilityLabel: "링크 저장 입력 닫기" }).props.onPress());
-  expect(hasInput()).toBe(false);
   await update({ hasLoaded: true, threads: [existing], pendingSharedUrl: "https://www.threads.com/@a/post/1" });
   expect(hasInput()).toBe(true);
+  expect(tree.root.findAllByProps({ accessibilityLabel: "링크 저장 입력 닫기" })).toHaveLength(0);
 });
