@@ -114,3 +114,23 @@ it("preserves manual collections without nesting the archive", async () => {
   expect(output()).not.toContain("전체 보관함");
   expect(onOpenCollections).toHaveBeenCalled();
 });
+it("uses the shared full-width page spacing without a standalone refresh action", async () => {
+  await mount();
+  const { StyleSheet } = require("react-native");
+  const { spacing } = require("../theme/tokens");
+  const scroll = tree.root.findAll((node) => node.props.keyboardShouldPersistTaps === "handled")[0];
+  const style = StyleSheet.flatten(scroll.props.contentContainerStyle);
+  expect(style.maxWidth).toBeUndefined();
+  expect(style.alignSelf).toBeUndefined();
+  expect(style.paddingHorizontal).toBe(spacing.lg);
+  expect(style.paddingTop).toBe(spacing.lg);
+  expect(output()).not.toContain('"accessibilityLabel":"새로고침"');
+  expect(classificationApi.list).toHaveBeenCalledTimes(1);
+});
+it("keeps an explicit retry when loading fails", async () => {
+  classificationApi.list.mockRejectedValueOnce(new Error("offline"));
+  await mount();
+  await press("다시 불러오기");
+  expect(classificationApi.list).toHaveBeenCalledTimes(2);
+  expect(output()).toContain("데이터 설계");
+});

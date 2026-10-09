@@ -230,11 +230,6 @@ export function ExploreScreen({
           accessibilityLabel="내가 만든 모음"
           onPress={onOpenCollections}
         />
-        <Action
-          label="새로고침"
-          disabled={!!working || loading}
-          onPress={() => setRefresh((v) => v + 1)}
-        />
       </View>
       <View style={styles.tabs}>
         {(["ARTICLE", "OPEN_SOURCE"] as const).map((value) => (
@@ -477,10 +472,8 @@ export function ExploreScreen({
 }
 const styles = StyleSheet.create({
   content: {
-    width: "100%",
-    maxWidth: 760,
-    alignSelf: "center",
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
     paddingBottom: spacing.xl,
     gap: spacing.md,
   },
