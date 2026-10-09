@@ -97,6 +97,7 @@ model SavedArticle {
   summaryVariants      SummaryVariant[]
   topicArticles        TopicArticle[]
   connectionScan       ConnectionScan?
+  classification       ArticleClassification?
   connectionsLeft      AutoConnection[] @relation("ConnectionLeft")
   connectionsRight     AutoConnection[] @relation("ConnectionRight")
 
@@ -149,6 +150,27 @@ model ConnectionScan {
 
   @@index([state, updatedAt])
   @@map("connection_scans")
+}
+
+model ArticleClassification {
+  articleId        String           @id
+  sourceGeneration Int
+  state            SummaryTaskState @default(PENDING)
+  kind             String           @default("UNCLASSIFIED") @db.VarChar(24)
+  categories       Json
+  projectName      String?          @db.VarChar(100)
+  useCase          String?          @db.VarChar(300)
+  evidence         String?          @db.Text
+  userEdited       Boolean          @default(false)
+  revision         Int              @default(1)
+  leaseToken       String?          @db.VarChar(36)
+  errorCode        String?          @db.VarChar(40)
+  updatedAt        DateTime         @updatedAt
+  article          SavedArticle     @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([state, updatedAt])
+  @@index([kind])
+  @@map("article_classifications")
 }
 
 model AutoConnection {

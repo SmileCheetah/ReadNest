@@ -49,6 +49,9 @@ const { Test } = require('@nestjs/testing');
 const { ValidationPipe, UnauthorizedException } = require('@nestjs/common');
 const { ConfigModule } = require('@nestjs/config');
 const { KnowledgeModule } = require('../dist/knowledge/knowledge.module');
+const { ClassificationService, CLASSIFICATION_QUEUE } = require('../dist/knowledge/classification.service');
+const { ClassificationProcessor } = require('../dist/knowledge/classification.processor');
+const { getQueueToken } = require('@nestjs/bullmq');
 const { PrismaModule } = require('../dist/prisma/prisma.module');
 const { PrismaService } = require('../dist/prisma/prisma.service');
 const { JwtAuthGuard } = require('../dist/auth/jwt-auth.guard');
@@ -168,6 +171,9 @@ async function main() {
   const moduleRef = await Test.createTestingModule({
     imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), PrismaModule, KnowledgeModule],
   })
+    .overrideProvider(getQueueToken(CLASSIFICATION_QUEUE)).useValue({ add: async () => {} })
+    .overrideProvider(ClassificationService).useValue({})
+    .overrideProvider(ClassificationProcessor).useValue({})
     .overrideGuard(JwtAuthGuard)
     .useValue({
       canActivate(context) {

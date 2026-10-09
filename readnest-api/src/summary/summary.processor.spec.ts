@@ -39,13 +39,13 @@ function setup() {
   };
   const ai = { summarize: jest.fn().mockResolvedValue(result) };
   const detection = { detectAndLink: jest.fn() };
-  const autoConnections = { schedule: jest.fn().mockResolvedValue(true) };
+  const classification = { schedule: jest.fn().mockResolvedValue(true) };
   const processor = new SummaryProcessor(
     jobs as never,
     extractor as never,
     ai as never,
     detection as never,
-    autoConnections as never,
+    classification as never,
   );
   const job = { data: { articleId: 'a', generation: 1, taskId: 't' } } as never;
   return {
@@ -53,7 +53,7 @@ function setup() {
     extractor,
     ai,
     detection,
-    autoConnections,
+    classification,
     processor,
     job,
     source,
@@ -79,7 +79,7 @@ describe('summary processing integrity', () => {
         summaryPreview: '중요한 근거가 담긴 본문입니다.',
       }),
     );
-    expect(s.autoConnections.schedule).toHaveBeenCalledWith('a');
+    expect(s.classification.schedule).toHaveBeenCalledWith('a');
   });
   it('does not invoke AI without usable source', async () => {
     const s = setup();
@@ -102,6 +102,13 @@ describe('summary processing integrity', () => {
     s.detection.detectAndLink.mockRejectedValue(
       new Error('enrichment unavailable'),
     );
+    await s.processor.process(s.job);
+    expect(s.jobs.complete).toHaveBeenCalledTimes(1);
+    expect(s.jobs.fail).not.toHaveBeenCalled();
+  });
+  it('keeps successful summary when classification dispatch fails', async () => {
+    const s = setup();
+    s.classification.schedule.mockRejectedValue(new Error('queue unavailable'));
     await s.processor.process(s.job);
     expect(s.jobs.complete).toHaveBeenCalledTimes(1);
     expect(s.jobs.fail).not.toHaveBeenCalled();

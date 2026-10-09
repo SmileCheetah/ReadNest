@@ -29,11 +29,11 @@ import { BottomNav } from "./src/components/BottomNav";
 import { ThreadCard } from "./src/components/ThreadCard";
 import { ThreadDetailScreen } from "./src/screens/ThreadDetailScreen";
 import { KnowledgeScreen } from "./src/screens/KnowledgeScreen";
-import { KnowledgeHubScreen } from "./src/screens/KnowledgeHubScreen";
+import { ExploreScreen } from "./src/screens/ExploreScreen";
 import { SavedThread } from "./src/data/mockThreads";
 import { colors, radius, shadow, spacing } from "./src/theme/tokens";
 
-export type ScreenName = "home" | "archive" | "settings";
+export type ScreenName = "home" | "explore" | "archive" | "settings";
 type ArchiveReadFilter = "ALL" | "UNREAD" | "READ" | "READ_LATER";
 type ArchivePeriod = "today" | "week" | "last-week" | "month" | "all";
 
@@ -340,7 +340,18 @@ export default function App() {
                   <Text style={styles.syncNoticeText}>{library.syncError}</Text>
                 </View>
               ) : null}
-              {screen === "archive" ? (
+              {screen === "explore" ? (
+                <ExploreScreen
+                  key={accessToken}
+                  token={accessToken}
+                  active={!selected && !knowledge && !topicPicker}
+                  onOpenThread={(thread) => void library.open(thread)}
+                  onOpenArchive={() => setScreen("archive")}
+                  onOpenCollections={() =>
+                    setKnowledgeRoute({ ownerToken: accessToken })
+                  }
+                />
+              ) : screen === "archive" ? (
                 <ArchiveScreen
                   activeTab={activeArchiveTab}
                   onChangeTab={setActiveArchiveTab}
@@ -356,9 +367,7 @@ export default function App() {
                   onRefresh={() => void library.refreshArchive()}
                   onLoadMore={() => void library.refreshArchive(true)}
                   onOpenThread={(thread) => void library.open(thread)}
-                  onOpenKnowledge={() =>
-                    setKnowledgeRoute({ ownerToken: accessToken })
-                  }
+                  onOpenKnowledge={() => setScreen("explore")}
                 />
               ) : (
                 <ScrollView
@@ -400,7 +409,7 @@ export default function App() {
                   knowledgeVisible ? "auto" : "no-hide-descendants"
                 }
               >
-                <KnowledgeHubScreen
+                <KnowledgeScreen
                   key={accessToken}
                   token={accessToken}
                   active={knowledgeVisible}
@@ -904,16 +913,16 @@ function ArchiveScreen({
           </Text>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="이어지는 생각 보기"
+            accessibilityLabel="주제별 탐색으로 돌아가기"
             style={styles.topicEntry}
             onPress={onOpenKnowledge}
           >
             <Ionicons
-              name="git-network-outline"
+              name="compass-outline"
               size={20}
               color={colors.primaryPressed}
             />
-            <Text style={styles.textButtonText}>이어지는 생각 보기</Text>
+            <Text style={styles.textButtonText}>주제별 탐색으로 돌아가기</Text>
             <Ionicons
               name="chevron-forward"
               size={18}

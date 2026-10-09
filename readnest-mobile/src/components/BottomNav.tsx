@@ -14,7 +14,7 @@ const items: Array<{
   icon: keyof typeof Ionicons.glyphMap;
 }> = [
   { key: "home", label: "홈", icon: "home-outline" },
-  { key: "archive", label: "보관함", icon: "archive-outline" },
+  { key: "explore", label: "탐색", icon: "compass-outline" },
   { key: "settings", label: "설정", icon: "settings-outline" },
 ];
 
@@ -22,7 +22,9 @@ export function BottomNav({ current, onChange }: Props) {
   return (
     <View style={styles.wrap}>
       {items.map((item) => {
-        const active = current === item.key;
+        const active =
+          current === item.key ||
+          (current === "archive" && item.key === "explore");
         return (
           <Pressable
             key={item.key}

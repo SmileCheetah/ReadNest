@@ -3,19 +3,15 @@ import { BullModule } from '@nestjs/bullmq';
 import { KnowledgeController } from './knowledge.controller';
 import { KnowledgeService } from './knowledge.service';
 import {
-  AutoConnectionsService,
-  AUTO_CONNECTION_QUEUE,
-} from './auto-connections.service';
-import { AutoConnectionsProcessor } from './auto-connections.processor';
+  ClassificationService,
+  CLASSIFICATION_QUEUE,
+} from './classification.service';
+import { ClassificationProcessor } from './classification.processor';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: AUTO_CONNECTION_QUEUE })],
+  imports: [BullModule.registerQueue({ name: CLASSIFICATION_QUEUE })],
   controllers: [KnowledgeController],
-  providers: [
-    KnowledgeService,
-    AutoConnectionsService,
-    AutoConnectionsProcessor,
-  ],
-  exports: [AutoConnectionsService],
+  providers: [KnowledgeService, ClassificationService, ClassificationProcessor],
+  exports: [ClassificationService],
 })
 export class KnowledgeModule {}

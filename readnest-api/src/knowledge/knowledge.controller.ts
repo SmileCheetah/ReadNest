@@ -14,7 +14,11 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthUser } from '../auth/types/auth-user';
 import { KnowledgeService } from './knowledge.service';
-import { AutoConnectionsService } from './auto-connections.service';
+import { ClassificationService } from './classification.service';
+import {
+  ClassificationQuery,
+  EditClassification,
+} from './classification-input';
 import {
   CreateTopicDto,
   ListTopicsQueryDto,
@@ -26,25 +30,37 @@ import {
 export class KnowledgeController {
   constructor(
     private readonly knowledge: KnowledgeService,
-    private readonly connections: AutoConnectionsService,
+    private readonly classification: ClassificationService,
   ) {}
 
-  @Get('connections')
-  connectionsList(@CurrentUser() user: AuthUser) {
-    return this.connections.list(user.id);
+  @Get('classifications')
+  classifications(
+    @CurrentUser() user: AuthUser,
+    @Query() query: ClassificationQuery,
+  ) {
+    return this.classification.list(user.id, query);
   }
 
-  @Post('connections/scan')
-  scanConnections(@CurrentUser() user: AuthUser) {
-    return this.connections.startPending(user.id);
+  @Post('classifications/scan')
+  scanClassifications(@CurrentUser() user: AuthUser) {
+    return this.classification.scan(user.id);
   }
 
-  @Post('connections/:articleId/retry')
-  retryConnection(
+  @Post('classifications/:articleId/retry')
+  retryClassification(
     @CurrentUser() user: AuthUser,
     @Param('articleId') articleId: string,
   ) {
-    return this.connections.retry(user.id, articleId);
+    return this.classification.retry(user.id, articleId);
+  }
+
+  @Patch('classifications/:articleId')
+  editClassification(
+    @CurrentUser() user: AuthUser,
+    @Param('articleId') articleId: string,
+    @Body() body: EditClassification,
+  ) {
+    return this.classification.edit(user.id, articleId, body);
   }
 
   @Get('topics')
