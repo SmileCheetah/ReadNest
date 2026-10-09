@@ -1,6 +1,7 @@
 /* Runs only against explicitly isolated local QA services. No real AI/source calls. */
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
+const { EventEmitter } = require('node:events');
 
 const database = new URL(process.env.DATABASE_URL || 'mysql://invalid');
 const redis = new URL(process.env.REDIS_URL || 'redis://invalid');
@@ -26,6 +27,7 @@ const { ContentExtractorService } = require('../dist/summary/content-extractor.s
 const { AiSummaryService } = require('../dist/summary/ai-summary.service');
 const { ThreadDetectionService } = require('../dist/summary/thread-detection.service');
 const { SummaryJobService } = require('../dist/summary/summary-job.service');
+const { QueueSafetyService } = require('../dist/queue/queue-safety.service');
 const { SummaryGenerationError } = require('../dist/summary/summary-errors');
 
 const rawText = 'AI가 코드를 작성해도 무엇을 만들지와 결과가 맞는지는 사람이 판단한다. 데이터 구조는 쉽게 바꾸기 어려우며 정합성과 맥락을 고려해야 한다. 테스트와 보안은 초기 설계부터, 운영과 장애 대응은 배포 후에도 계속 필요하다.';
@@ -246,7 +248,7 @@ async function main() {
       articleId: document.id, generation: 1, state: 'RUNNING', attempts: 1,
       leaseToken: 'expired-lease', leaseExpiresAt: new Date(Date.now() - 1000),
     } });
-    const jobs = new SummaryJobService(prisma, { add: async () => ({}) });
+    const jobs = new SummaryJobService(prisma, Object.assign(new EventEmitter(), { add: async () => ({}) }), new QueueSafetyService());
     await jobs.dispatch();
     const data = { articleId: document.id, generation: 1, taskId: task.id };
     const claimed = await Promise.all([jobs.claim(data), jobs.claim(data)]);

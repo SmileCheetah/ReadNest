@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import {
@@ -16,11 +16,16 @@ import { SummaryGenerationError, summaryFailure } from './summary-errors';
 import { ThreadDetectionService } from './thread-detection.service';
 import { summaryPreview } from '../articles/utils/summary-preview';
 import { ClassificationService } from '../knowledge/classification.service';
+import { QueueSafetyService } from '../queue/queue-safety.service';
+import {
+  QUEUE_WORKER_OPTIONS,
+  QuotaAwareWorkerHost,
+} from '../queue/quota-aware-worker.host';
 
 type Checkpoint = { summary: SummaryResult; source: ExtractedContent };
 
-@Processor(SUMMARY_QUEUE, { concurrency: 2 })
-export class SummaryProcessor extends WorkerHost {
+@Processor(SUMMARY_QUEUE, { ...QUEUE_WORKER_OPTIONS, concurrency: 2 })
+export class SummaryProcessor extends QuotaAwareWorkerHost {
   private readonly logger = new Logger(SummaryProcessor.name);
   constructor(
     private readonly jobs: SummaryJobService,
@@ -28,8 +33,9 @@ export class SummaryProcessor extends WorkerHost {
     private readonly aiSummaryService: AiSummaryService,
     private readonly threadDetectionService: ThreadDetectionService,
     private readonly classification: ClassificationService,
+    queueSafety: QueueSafetyService,
   ) {
-    super();
+    super(queueSafety);
   }
 
   async process(job: Job<SummaryJobData>) {

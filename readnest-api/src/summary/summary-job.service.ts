@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { SUMMARY_ARTICLE_JOB, SUMMARY_QUEUE } from './summary.constants';
 import { SummaryGenerationError } from './summary-errors';
+import { QueueSafetyService } from '../queue/queue-safety.service';
 
 export type SummaryJobData = {
   articleId: string;
@@ -36,7 +37,10 @@ export class SummaryJobService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue(SUMMARY_QUEUE) private readonly queue: Queue<SummaryJobData>,
-  ) {}
+    private readonly queueSafety: QueueSafetyService,
+  ) {
+    this.queueSafety.watchQueue(queue);
+  }
 
   onModuleInit() {
     this.timer = setInterval(() => {
@@ -51,7 +55,7 @@ export class SummaryJobService implements OnModuleInit, OnModuleDestroy {
 
   // Persistent PENDING records are the outbox. Queue delivery may repeat; claim is CAS.
   async dispatch() {
-    if (this.dispatching) return;
+    if (this.dispatching || this.queueSafety.isQuotaBlocked) return;
     this.dispatching = true;
     try {
       const now = new Date();
@@ -98,20 +102,22 @@ export class SummaryJobService implements OnModuleInit, OnModuleDestroy {
       for (const task of tasks) {
         let pending = this.pendingEnqueue.get(task.id);
         if (!pending) {
-          pending = this.queue
-            .add(
-              SUMMARY_ARTICLE_JOB,
-              {
-                articleId: task.articleId,
-                generation: task.generation,
-                taskId: task.id,
-              },
-              {
-                jobId: task.id,
-                attempts: 1,
-                removeOnComplete: true,
-                removeOnFail: true,
-              },
+          pending = this.queueSafety
+            .enqueue(() =>
+              this.queue.add(
+                SUMMARY_ARTICLE_JOB,
+                {
+                  articleId: task.articleId,
+                  generation: task.generation,
+                  taskId: task.id,
+                },
+                {
+                  jobId: task.id,
+                  attempts: 1,
+                  removeOnComplete: true,
+                  removeOnFail: true,
+                },
+              ),
             )
             .finally(() => {
               this.pendingEnqueue.delete(task.id);

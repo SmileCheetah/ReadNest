@@ -15,6 +15,7 @@ import {
 } from './summary.constants';
 import { SummaryGenerationError } from './summary-errors';
 import { LEASE_MS, MAX_TASK_ATTEMPTS } from './summary-job.service';
+import { QueueSafetyService } from '../queue/queue-safety.service';
 
 export type SummaryVariantJobData = {
   taskId: string;
@@ -36,7 +37,10 @@ export class SummaryVariantJobService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     @InjectQueue(SUMMARY_VARIANT_QUEUE)
     private readonly queue: Queue<SummaryVariantJobData>,
-  ) {}
+    private readonly queueSafety: QueueSafetyService,
+  ) {
+    this.queueSafety.watchQueue(queue);
+  }
 
   onModuleInit() {
     this.timer = setInterval(() => void this.dispatch(), 5000);
@@ -49,7 +53,7 @@ export class SummaryVariantJobService implements OnModuleInit, OnModuleDestroy {
   }
 
   async dispatch() {
-    if (this.dispatching) return;
+    if (this.dispatching || this.queueSafety.isQuotaBlocked) return;
     this.dispatching = true;
     try {
       const now = new Date();
@@ -110,21 +114,23 @@ export class SummaryVariantJobService implements OnModuleInit, OnModuleDestroy {
       for (const task of tasks) {
         let pending = this.pendingEnqueue.get(task.id);
         if (!pending) {
-          pending = this.queue
-            .add(
-              SUMMARY_VARIANT_JOB,
-              {
-                taskId: task.id,
-                variantId: task.variantId,
-                generation: task.generation,
-                sourceGeneration: task.sourceGeneration,
-              },
-              {
-                jobId: task.id,
-                attempts: 1,
-                removeOnComplete: true,
-                removeOnFail: true,
-              },
+          pending = this.queueSafety
+            .enqueue(() =>
+              this.queue.add(
+                SUMMARY_VARIANT_JOB,
+                {
+                  taskId: task.id,
+                  variantId: task.variantId,
+                  generation: task.generation,
+                  sourceGeneration: task.sourceGeneration,
+                },
+                {
+                  jobId: task.id,
+                  attempts: 1,
+                  removeOnComplete: true,
+                  removeOnFail: true,
+                },
+              ),
             )
             .finally(() => this.pendingEnqueue.delete(task.id));
           this.pendingEnqueue.set(task.id, pending);

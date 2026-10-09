@@ -12,6 +12,7 @@ import { Queue } from 'bullmq';
 import { randomUUID } from 'node:crypto';
 import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
+import { QueueSafetyService } from '../queue/queue-safety.service';
 import {
   ClassificationQuery,
   EditClassification,
@@ -38,7 +39,9 @@ export class ClassificationService {
     config: ConfigService,
     @InjectQueue(CLASSIFICATION_QUEUE)
     private readonly queue: Queue<ClassificationJob>,
+    private readonly queueSafety: QueueSafetyService,
   ) {
+    this.queueSafety.watchQueue(queue);
     const key = config.get<string>('OPENAI_API_KEY')?.trim();
     this.client = key
       ? new OpenAI({ apiKey: key, timeout: 60000, maxRetries: 0 })
@@ -47,6 +50,7 @@ export class ClassificationService {
   }
 
   async schedule(articleId: string, retry = false) {
+    if (this.queueSafety.isQuotaBlocked) return false;
     const article = await this.prisma.savedArticle.findUnique({
       where: { id: articleId },
       include: { classification: true },
@@ -111,20 +115,28 @@ export class ClassificationService {
       scan.sourceGeneration !== article.resultGeneration
     )
       return false;
-    await this.queue.add(
-      'classify',
-      {
-        articleId,
-        sourceGeneration: scan.sourceGeneration,
-        revision: scan.revision,
-      },
-      {
-        jobId: `${articleId}-${scan.revision}`,
-        attempts: 1,
-        removeOnComplete: true,
-        removeOnFail: true,
-      },
-    );
+    try {
+      await this.queueSafety.enqueue(() =>
+        this.queue.add(
+          'classify',
+          {
+            articleId,
+            sourceGeneration: scan.sourceGeneration,
+            revision: scan.revision,
+          },
+          {
+            jobId: `${articleId}-${scan.revision}`,
+            attempts: 1,
+            removeOnComplete: true,
+            removeOnFail: true,
+          },
+        ),
+      );
+    } catch (error) {
+      // Optional classification can be picked up by scan after recovery.
+      if (this.queueSafety.isQuotaBlocked) return false;
+      throw error;
+    }
     return true;
   }
 

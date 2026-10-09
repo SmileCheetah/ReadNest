@@ -1,6 +1,7 @@
 // Local integration + three paid synthetic classification calls. No user source or secrets printed.
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
+const { EventEmitter } = require('node:events');
 if (process.env.READNEST_CLASSIFICATION_QA !== '1') throw new Error('Set READNEST_CLASSIFICATION_QA=1 for local QA.');
 require('dotenv').config({ quiet: true });
 const database = new URL(process.env.DATABASE_URL || '');
@@ -9,8 +10,9 @@ const { PrismaClient } = require('@prisma/client');
 const { ConfigService } = require('@nestjs/config');
 const { JwtService } = require('@nestjs/jwt');
 const { ClassificationService } = require('../dist/knowledge/classification.service');
+const { QueueSafetyService } = require('../dist/queue/queue-safety.service');
 const prisma = new PrismaClient();
-const service = new ClassificationService(prisma, new ConfigService(), { add: async () => {} });
+const service = new ClassificationService(prisma, new ConfigService(), Object.assign(new EventEmitter(), { add: async () => {} }), new QueueSafetyService());
 const jwt = new JwtService({ secret: process.env.JWT_SECRET });
 const base = 'http://localhost:3001/api';
 let owner;

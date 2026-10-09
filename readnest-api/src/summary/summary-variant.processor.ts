@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { AiSummaryService } from './ai-summary.service';
@@ -9,16 +9,22 @@ import {
   SummaryVariantJobService,
 } from './summary-variant-job.service';
 import { validateSummaryMarkdown } from './summary-markdown-validator';
+import { QueueSafetyService } from '../queue/queue-safety.service';
+import {
+  QUEUE_WORKER_OPTIONS,
+  QuotaAwareWorkerHost,
+} from '../queue/quota-aware-worker.host';
 
-@Processor(SUMMARY_VARIANT_QUEUE, { concurrency: 2 })
-export class SummaryVariantProcessor extends WorkerHost {
+@Processor(SUMMARY_VARIANT_QUEUE, { ...QUEUE_WORKER_OPTIONS, concurrency: 2 })
+export class SummaryVariantProcessor extends QuotaAwareWorkerHost {
   private readonly logger = new Logger(SummaryVariantProcessor.name);
 
   constructor(
     private readonly jobs: SummaryVariantJobService,
     private readonly aiSummaryService: AiSummaryService,
+    queueSafety: QueueSafetyService,
   ) {
-    super();
+    super(queueSafety);
   }
 
   async process(job: Job<SummaryVariantJobData>) {

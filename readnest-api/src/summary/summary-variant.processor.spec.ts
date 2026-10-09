@@ -1,4 +1,5 @@
 import { SummaryVariantProcessor } from './summary-variant.processor';
+import { QueueSafetyService } from '../queue/queue-safety.service';
 
 const markdown = '# 자세한 제목\n\n원문의 근거를 보존한 요약입니다.';
 
@@ -32,7 +33,11 @@ function setup() {
       meta: { summaryMarkdown: markdown },
     }),
   };
-  const processor = new SummaryVariantProcessor(jobs as never, ai as never);
+  const processor = new SummaryVariantProcessor(
+    jobs as never,
+    ai as never,
+    new QueueSafetyService(),
+  );
   return {
     jobs,
     ai,

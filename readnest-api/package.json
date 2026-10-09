@@ -22,6 +22,7 @@
     "prisma:migrate:deploy": "node scripts/with-database-url.cjs prisma migrate deploy",
     "prisma:studio": "node scripts/with-database-url.cjs prisma studio",
     "test": "jest",
+    "test:queue-safety": "node scripts/verify-queue-safety.cjs",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",

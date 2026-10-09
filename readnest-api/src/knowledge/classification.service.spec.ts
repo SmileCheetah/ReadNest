@@ -1,6 +1,7 @@
 /* Jest asymmetric matchers and intentionally minimal persistence fakes. */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
 import { ClassificationService } from './classification.service';
+import { QueueSafetyService } from '../queue/queue-safety.service';
 import {
   parseClassification,
   validateCategories,
@@ -28,15 +29,44 @@ function setup() {
     },
     $queryRaw: jest.fn().mockResolvedValue([]),
   };
-  const queue = { add: jest.fn() };
+  const queue = { add: jest.fn(), on: jest.fn() };
+  const safety = new QueueSafetyService();
   const service = new ClassificationService(
     prisma as never,
     { get: () => undefined } as never,
     queue as never,
+    safety,
   );
-  return { prisma, queue, service };
+  return { prisma, queue, service, safety };
 }
 describe('classification contract', () => {
+  it('blocks repeated classification enqueue after quota without changing saved data', async () => {
+    const s = setup();
+    s.prisma.savedArticle.findUnique.mockResolvedValue({
+      rawText: '원문',
+      resultGeneration: 2,
+      processStatus: 'SUMMARY_DONE',
+      classification: {
+        userEdited: false,
+        sourceGeneration: 2,
+        state: 'PENDING',
+      },
+    });
+    s.prisma.articleClassification.findUnique.mockResolvedValue({
+      userEdited: false,
+      sourceGeneration: 2,
+      state: 'PENDING',
+      revision: 1,
+    });
+    s.queue.add.mockRejectedValue(
+      new Error('ERR max requests limit exceeded.'),
+    );
+    expect(await s.service.schedule('a')).toBe(false);
+    expect(await s.service.schedule('a')).toBe(false);
+    expect(s.safety.isQuotaBlocked).toBe(true);
+    expect(s.queue.add).toHaveBeenCalledTimes(1);
+    expect(s.prisma.articleClassification.updateMany).not.toHaveBeenCalled();
+  });
   it('accepts multiple topics and exact source evidence', () => {
     expect(
       parseClassification(

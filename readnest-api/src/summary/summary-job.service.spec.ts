@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 import { SummaryJobService } from './summary-job.service';
 import { SummaryGenerationError } from './summary-errors';
+import { QueueSafetyService } from '../queue/queue-safety.service';
 
 function setup() {
   const tx = {
@@ -18,8 +19,12 @@ function setup() {
     ...tx,
     $transaction: jest.fn((fn: (transaction: typeof tx) => unknown) => fn(tx)),
   };
-  const queue = { add: jest.fn().mockResolvedValue({}) };
-  const service = new SummaryJobService(prisma as never, queue as never);
+  const queue = { add: jest.fn().mockResolvedValue({}), on: jest.fn() };
+  const service = new SummaryJobService(
+    prisma as never,
+    queue as never,
+    new QueueSafetyService(),
+  );
   const lease = {
     taskId: 'task',
     articleId: 'article',

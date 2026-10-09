@@ -1,5 +1,6 @@
 import { SummaryProcessor } from './summary.processor';
 import { SummaryGenerationError } from './summary-errors';
+import { QueueSafetyService } from '../queue/queue-safety.service';
 
 const document = '# 제목\n\n중요한 근거가 담긴 본문입니다.';
 function setup() {
@@ -46,6 +47,7 @@ function setup() {
     ai as never,
     detection as never,
     classification as never,
+    new QueueSafetyService(),
   );
   const job = { data: { articleId: 'a', generation: 1, taskId: 't' } } as never;
   return {

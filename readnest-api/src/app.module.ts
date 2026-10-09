@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SummaryModule } from './summary/summary.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
+import { QueueSafetyModule } from './queue/queue-safety.module';
 import {
   AccountDeletionController,
   PrivacyController,
@@ -62,6 +63,7 @@ import {
       },
     }),
     PrismaModule,
+    QueueSafetyModule,
     AuthModule,
     SummaryModule,
     ArticlesModule,
