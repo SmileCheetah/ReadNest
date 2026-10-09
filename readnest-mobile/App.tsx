@@ -346,7 +346,6 @@ export default function App() {
                   token={accessToken}
                   active={!selected && !knowledge && !topicPicker}
                   onOpenThread={(thread) => void library.open(thread)}
-                  onOpenArchive={() => setScreen("archive")}
                   onOpenCollections={() =>
                     setKnowledgeRoute({ ownerToken: accessToken })
                   }
@@ -367,7 +366,6 @@ export default function App() {
                   onRefresh={() => void library.refreshArchive()}
                   onLoadMore={() => void library.refreshArchive(true)}
                   onOpenThread={(thread) => void library.open(thread)}
-                  onOpenKnowledge={() => setScreen("explore")}
                 />
               ) : (
                 <ScrollView
@@ -862,7 +860,6 @@ function ArchiveScreen({
   onRefresh,
   onLoadMore,
   onOpenThread,
-  onOpenKnowledge,
 }: {
   activeTab: string;
   onChangeTab: (tab: string) => void;
@@ -878,7 +875,6 @@ function ArchiveScreen({
   onRefresh: () => void;
   onLoadMore: () => void;
   onOpenThread: (thread: SavedThread) => void;
-  onOpenKnowledge: () => void;
 }) {
   const filters: Array<{ label: string; value: ArchiveReadFilter }> = [
     { label: "전체", value: "ALL" },
@@ -911,24 +907,6 @@ function ArchiveScreen({
           <Text style={styles.homeDescription}>
             저장한 생각을 다시 찾아보세요.
           </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="주제별 탐색으로 돌아가기"
-            style={styles.topicEntry}
-            onPress={onOpenKnowledge}
-          >
-            <Ionicons
-              name="compass-outline"
-              size={20}
-              color={colors.primaryPressed}
-            />
-            <Text style={styles.textButtonText}>주제별 탐색으로 돌아가기</Text>
-            <Ionicons
-              name="chevron-forward"
-              size={18}
-              color={colors.primaryPressed}
-            />
-          </Pressable>
           <Text style={styles.inputLabel}>저장글 검색</Text>
           <View style={styles.searchBox}>
             <Ionicons name="search-outline" size={18} color={colors.muted} />
@@ -1155,17 +1133,6 @@ function SettingRow({
 
 const styles = StyleSheet.create({
   hiddenScreen: { display: "none" },
-  topicEntry: {
-    minHeight: 48,
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.blueSoft,
-  },
   homeHeading: {
     marginBottom: spacing.lg,
   },

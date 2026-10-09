@@ -66,7 +66,6 @@ async function mount(props = {}) {
       React.createElement(ExploreScreen, {
         token: "t",
         onOpenThread: jest.fn(),
-        onOpenArchive: jest.fn(),
         onOpenCollections: jest.fn(),
         ...props,
       }),
@@ -108,12 +107,10 @@ it("does not scan while the screen is hidden", async () => {
   await mount({ active: false });
   expect(classificationApi.scan).not.toHaveBeenCalled();
 });
-it("offers archive and preserves manual collections", async () => {
-  const onOpenArchive = jest.fn();
+it("preserves manual collections without nesting the archive", async () => {
   const onOpenCollections = jest.fn();
-  await mount({ onOpenArchive, onOpenCollections });
-  await press("전체 보관함");
+  await mount({ onOpenCollections });
   await press("내가 만든 모음");
-  expect(onOpenArchive).toHaveBeenCalled();
+  expect(output()).not.toContain("전체 보관함");
   expect(onOpenCollections).toHaveBeenCalled();
 });

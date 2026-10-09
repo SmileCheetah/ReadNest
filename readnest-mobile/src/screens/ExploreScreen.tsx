@@ -23,7 +23,6 @@ type Props = {
   token: string;
   active?: boolean;
   onOpenThread: (thread: SavedThread) => void;
-  onOpenArchive: () => void;
   onOpenCollections: () => void;
 };
 const labels: Record<ClassificationKind, string> = {
@@ -72,7 +71,6 @@ export function ExploreScreen({
   token,
   active = true,
   onOpenThread,
-  onOpenArchive,
   onOpenCollections,
 }: Props) {
   const [section, setSection] = useState<"ARTICLE" | "OPEN_SOURCE">("ARTICLE");
@@ -227,11 +225,6 @@ export function ExploreScreen({
         글은 주제별로, 오픈소스는 쓸모별로 자동 정리됩니다.
       </Text>
       <View style={styles.row}>
-        <Action
-          label="보관함"
-          accessibilityLabel="전체 보관함"
-          onPress={onOpenArchive}
-        />
         <Action
           label="내 모음"
           accessibilityLabel="내가 만든 모음"
