@@ -61,6 +61,16 @@ command: evalsha
 - 검증: 세 큐의 처리 재개, 기존 미완료 작업의 안전한 복구, 중복 처리 여부, 유휴·작업 중 요청량 비교를 기록할 예정
 - 재발 방지: 사용량 알림과 예상 월간 요청량 관리 방안을 적용 후 기록
 
+### 2026-10-10 원인 조사 결과
+
+1. **상시 worker 요청 확인:** `AppModule`이 `SummaryModule`과 `KnowledgeModule`을 항상 등록하고 각 모듈은 processor를 provider로 등록한다. 서버 프로세스마다 기본 요약·밀도별 요약·분류 worker가 시작되는 구조다. 운영 replica 수는 확인하지 못했으므로 중복 운영을 확정하지 않는다.
+2. **로컬 측정:** 새 요약·분류 작업을 요청하지 않은 30.002초 동안 로컬 Redis `INFO commandstats` 차이를 관측했다. `BZPOPMIN` 15회, `EVALSHA` 18회가 발생했다. Lua 내부의 `HMGET`, `ZRANGE` 등도 통계에 잡히므로 전부 더해 외부 요청 수로 해석하지 않는다. 이 두 명령만 같은 속도로 지속된다는 가정이면 약 9.5만 회/일, 285만 회/30일이다. **운영 실측·Upstash 과금 수치가 아니며**, 다른 클라이언트의 영향과 운영 Redis의 blocking 동작 차이를 배제하지 않았다.
+3. **오류 반복 원인 확인:** 설치된 BullMQ의 `Worker.mainLoop`는 `retryIfFailed`에 `onlyEmitError: true`를 전달한다. 한도 오류는 `isNotConnectionError`에서 연결 오류가 아닌 것으로 분류되어, `runRetryDelay: 15000` 대기 전에 오류를 emit하고 반환한다. worker 루프가 다시 요청할 수 있어, 항상 15초 후 재시도된다고 볼 수 없다. Redis 연결 없이 해당 메서드에 한도 오류를 넣는 단일 호출 재현에서 `emit=1`, `delay=0`을 확인했다. 제공 로그의 짧은 EVALSHA 반복 간격과 일치하는 경로다. 한도 소진 전 요청률의 증거는 아니다.
+4. **개발 환경 분리 확인:** 현재 `readnest-api/.env`와 모바일 `.env.local`의 Redis 대상은 로컬이며 `REDIS_URL` 우선 설정은 없다. 실행 중 로컬 API PID 89728의 실제 Redis TCP 연결도 `::1:6379`였다. 따라서 이 로컬 API가 현재 Upstash를 직접 사용한다는 가설은 배제한다. 과거 설정·다른 개발 프로세스·운영 환경은 별도다. 비밀값은 출력·기록하지 않았다.
+5. **5초 타이머 구분:** `SummaryJobService`와 `SummaryVariantJobService`의 5초 dispatch는 먼저 MySQL을 조회하고 PENDING 작업이 있을 때 Redis `queue.add`를 호출한다. 따라서 두 타이머의 모든 tick을 Redis 요청으로 세면 안 된다. PENDING 작업이 오래 남으면 재등록 시도는 추가 요청을 만들 수 있다. `attempts: 1`은 작업 실패 재시도 설정이지 worker의 Redis 조회 루프를 막는 설정은 아니다.
+
+**현재 결론:** 상시 worker의 요청이 제한을 소진할 수 있는 구조와, 한도 초과 후 오류가 빠르게 반복될 수 있는 경로를 확인했다. 정확히 어떤 운영 인스턴스가 언제 500,004회를 누적했는지는 Upstash 사용량 그래프·운영 replica 및 배포 버전 확인이 필요하다. 현재 사용 가능한 전용 도구에서 Upstash/KoDeploy 운영 조회 연결은 확인되지 않았다. 사용자 콘솔의 해당 수치 또는 읽기 가능한 운영 정보가 필요하다. 제품 코드·서버 설정은 변경하지 않았으며 상태는 미해결로 유지한다.
+
 ## 새 오류 기록 양식
 
 ```markdown
