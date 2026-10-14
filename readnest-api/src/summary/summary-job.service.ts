@@ -103,7 +103,7 @@ export class SummaryJobService implements OnModuleInit, OnModuleDestroy {
         let pending = this.pendingEnqueue.get(task.id);
         if (!pending) {
           pending = this.queueSafety
-            .enqueue(() =>
+            .enqueue(SUMMARY_QUEUE, () =>
               this.queue.add(
                 SUMMARY_ARTICLE_JOB,
                 {

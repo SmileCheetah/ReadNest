@@ -146,6 +146,54 @@ command: evalsha
 - 최초 통합 실행의 복구 fixture는 worker의 로컬 pause만으로 대기 작업이 보존된다고 가정해 timeout이 발생했다. 진행 중 fetch가 작업을 가져갈 수 있어, 임시 테스트 큐만 전역 pause하고 실제 대기 개수를 검증하도록 수정했다. 이후 `npm run test:queue-safety -- --functional-only` 통과. 125초 전후 측정은 수정 전 실행에서 완료했으며, fixture 수정 후 동일 측정을 다시 반복하지는 않았다. 검증에 생성한 Redis/프로세스는 종료했다.
 - **무료 월 50만 회 이내 사용을 보장하지 않는다.** 실제 작업량, 인스턴스 수, Lua 명령 과금 집계, 네트워크/오류 상황에 따라 달라진다. 이 변경은 불필요한 대기 호출과 한도 초과 후 반복 실패를 줄이지만, 이미 소진된 한도를 복구하지 않는다. [Upstash도 BullMQ가 작업 없이 Redis를 정기적으로 사용한다고 안내한다](https://upstash.com/docs/redis/integrations/bullmq).
 
+### ERR-001 유휴 작업자 중지 및 DB 기반 재개 (2026-10-15)
+
+#### 남아 있던 문제
+
+10월 10일 변경은 유휴 Redis 호출을 줄였지만 완전히 멈추지는 않았다. 사용자가 앱을 사용하지 않아도 실행 중인 BullMQ worker의 fetch와 stalled 확인이 계속될 수 있었다. 이미 소진된 운영 한도도 복구되지 않았다.
+
+#### 이번 해결 방법
+
+- 세 worker는 bootstrap에서 등록만 하고, 해당 큐의 작업 등록이 성공했을 때 실행한다. bootstrap 전에 성공한 등록도 기억한다.
+- 마지막 DB 작업 수요 이후 15초의 유예 시간이 지나고 로컬 실행 작업이 없으면 `worker.pause(false)`로 해당 worker만 멈춘다. 전역 큐를 pause하지 않으며, 이미 가져온 작업은 안전하게 마무리한다. 실행 중인 작업의 lock 갱신을 끊지 않는다.
+- pause 도중 새 작업이 들어오면 pause 완료 후 다시 깨운다. 한도 차단이나 서버 종료가 발생하면 예약된 재개를 취소한다.
+- 기본 요약·밀도별 요약의 기존 5초 DB dispatcher를 유지한다. DB에 처리할 작업이 없으면 Redis를 호출하지 않는다. 같은 job ID의 재등록도 수요 신호로 사용하므로, Redis에 이전 active 작업이 남아 있으면 stalled 복구가 계속 실행된다.
+- 자동 분류도 5초 간격으로 DB에서 복구한다. 기존 인덱스로 PENDING/만료 RUNNING을 각각 최대 50개 조회하고, 별도로 PK cursor를 따라 글 메타데이터 50개씩 순회해 한도 오류 중 생성되지 못한 분류 레코드와 변경된 원문 세대를 찾는다. 전체 글 본문을 매번 조회하지 않으며 마지막 페이지 후 처음부터 순회한다. 정상 실패의 무한 재시도와 사용자가 편집한 분류의 덮어쓰기는 하지 않는다. 5분이 지난 실행 회수에는 revision·sourceGeneration·leaseToken 비교를 적용한다.
+- BullMQ의 완료 후 다음 작업을 바로 가져오는 경로는 `active` 이벤트를 생략할 수 있어, 실제 processor 진입/종료를 공통 host에서 추적한다. Redis 완료/실패 이벤트가 없어도 `finally`에서 정리해 작업자가 계속 깨어 있는 누수를 방지한다. 이미 닫힌 worker에는 지연된 타이머가 다시 접근하지 않는다.
+- 새 Redis로 이전하더라도 MySQL의 대기 작업이 다시 등록되는 구조를 유지한다. 완료된 글을 재요약하거나 요약 프롬프트를 바꾸지 않는다. 미분류 과거 글은 자동 분류 backlog에 포함될 수 있으며, 이는 실제 AI/Redis 사용량을 만든다.
+- 새 패키지·DB migration·모바일 변경은 없다. DB 조회 비용, 연결 초기화/재연결 비용, 실제 작업 비용은 남는다. 월 50만 회 이하 사용을 보장하는 변경은 아니다.
+
+#### 신규 Redis 생성 확인 및 운영 복구 경계
+
+- 로그인된 Upstash 콘솔에서 기존 `readnest-redis`가 Free Tier, 월간 명령 약 50만, SUSPENDED로 표시되는 것을 확인했다. 목록 배너에는 bandwidth limit 문구도 있어, 기존 서버의 request-limit 오류와 동일한 집계 원인이라고 단정하지 않는다.
+- `Create Database`를 열자 **무료 등급은 DB 1개이며 추가 DB 생성에는 결제수단 등록/요금제 변경이 필요하다**는 안내로 차단됐다. [공식 가격표](https://upstash.com/pricing/redis)의 1 Free DB 제한과 일치한다.
+- 새 DB는 생성하지 않았다. 기존 DB 삭제, 결제수단 등록, 요금제 변경, 운영 환경변수 변경, 운영 배포도 수행하지 않았다. 삭제 후 재생성으로 무료 한도가 복구된다는 보장은 없으며 해결책으로 사용하지 않는다.
+- 기존 DB의 한도 회복/요금제 변경을 선택하면 연결 주소 변경 없이 개선 코드를 배포하고 재시작한다. 별도 Redis 이전을 선택하면 연결 환경변수를 먼저 검증한 뒤 개선 코드를 배포·재시작한다. `REDIS_URL`이 있으면 개별 `REDIS_HOST/PORT/USERNAME/PASSWORD/TLS`보다 우선하므로 서로 다른 대상을 혼용하지 않는다. 비밀값은 문서나 대화에 붙이지 않는다.
+- 이전할 때는 기존 worker를 중단하고 동일한 MySQL을 유지한 상태로 새 worker를 올린다. DB lease 회수 후 대기 작업이 처리되는지 확인한다. 새 Redis만 만들거나 서버만 재시작하는 것은 근본 해결이 아니다.
+
+#### 검증
+
+- `npm run build`: 통과. `npm test -- --runInBand`: **21 suites / 219 tests 통과**. 전체 ESLint는 오류 0건, 기존 `main.ts` floating promise 경고 1건이다. `git diff --check` 통과.
+- 회귀 테스트는 bootstrap 이전 등록, 큐별 재개, pause 도중 등록/종료/한도 차단, 실행 중 작업, 완료 이벤트 없는 lost-lock 경로의 정리, 닫힌 worker의 늦은 콜백, DB 무작업 조회, 분류의 누락/만료/세대 변경/수동 편집/정상 실패/배치 정체 방지를 포함한다.
+- 최종 코드에서 세 큐의 초기 유휴 125,020ms와 작업 후 절전 상태 125,008ms를 각각 측정했고, 관측용 `INFO`를 제외한 Redis 명령 증가가 모두 **0건**이었다. enqueue부터 processor 시작까지 로컬 무부하 측정은 20ms / 1ms / 1ms였다. 초기 handshake·절전 전 유예·실제 작업·재연결 비용과 Upstash 청구량은 이 수치에 포함하지 않는다.
+- 실제 BullMQ에서 pause 도중 enqueue 재개, `active` 이벤트 없이 가져온 작업의 18초 이상 lock 유지 및 concurrency 2 활용, 한도 오류 모의 주입 후 16초 추가 명령 0건, 새 worker의 대기 작업 3건 처리, 실제 Nest bootstrap 전 등록과 상속된 오류 핸들러를 확인했다.
+- stalled 회수 fixture는 테스트용 lock/stalled 간격을 줄여 실행했다. 추가 functional 실행에서는 기존 orphan lock을 18초 유지해 15초 유휴 유예를 넘겨도 DB 수요 갱신 신호로 깨어 있는 것을 확인했고, 18,227ms 후 1회 복구됐다. 운영의 120초 stalled 간격/90초 DB lease를 실제 시간대로 함께 검증한 결과는 아니다.
+- 전체 통합 실행과 보완 functional 실행 모두 종료 코드 0으로 완료했다. 테스트용 Redis·Node 프로세스와 소켓은 정리했으며 운영 연결정보나 `.env`는 사용하지 않았다.
+- 실제 MySQL·운영 Redis·실제 AI를 포함한 이전은 실행하지 않았다. DB 복구 조건은 mock 기반 단위 테스트, Redis 재개는 격리 Redis 통합 테스트로 각각 검증했다. 공급자별 TLS/재연결/명령 호환성은 대상 선택 후 확인한다. **운영 상태는 미해결**이며 운영 한도 복구 및 배포 후 검증 전에는 해결로 변경하지 않는다.
+
+#### 다른 서비스 이전 검토 — 사용자 선택 반영 (2026-10-15)
+
+사용자는 기존 Upstash 유료 전환 대신 다른 Redis 서비스 검토를 선택했다. 아래는 공식 문서 기반 후보 비교이며 계정 생성·결제·운영 변경은 하지 않았다.
+
+| 후보 | 확인한 조건 | 판단 |
+| --- | --- | --- |
+| Redis Cloud Essentials 유료 | [공식 가격표](https://redis.io/pricing/)상 월 $5부터. [일반 250MB 플랜](https://redis.io/docs/latest/operate/rc/subscriptions/view-essentials-subscription/essentials-plan-details/)은 256 연결·1,000 ops/s·월 100GB 네트워크 제한. 유료 플랜은 [AOF persistence](https://redis.io/docs/latest/operate/rc/databases/configuration/data-persistence/)를 지원하고 [미사용만을 이유로 삭제하지 않음](https://support.redislabs.com/hc/en-us/articles/34131767970450-Preventing-Database-Deletion-Due-to-Inactivity-in-Redis-Cloud). | 운영 우선 후보. 실제 지역·플랜·복제 옵션의 견적은 생성 직전 확인. $5 기본 가격을 고가용성 보장이나 무제한 사용으로 해석하지 않는다. |
+| Redis Cloud 무료 | 30MB·30 연결·100 ops/s·월 5GB. persistence/복제 없음. [14일 미사용 시 삭제될 수 있음](https://support.redislabs.com/hc/en-us/articles/33138489404818-Free-Redis-Cloud-Database-Deleted-Due-to-Inactivity). | 테스트용 후보. 절전 worker와 함께 장기간 미사용할 운영 서비스의 상시 가용성을 보장하지 못한다. |
+| Aiven Valkey 무료 | [1GB RAM, maxmemory 50%, 단일 노드, SLA 없음, 미사용 시 전원 중지 가능](https://aiven.io/docs/products/valkey/concepts/valkey-free-tier). 무료는 [지역 선택 불가](https://aiven.io/docs/products/valkey/get-started). | 무료 실험 후보. 실제 BullMQ/TLS 검증 필요. 현재 앱은 `rediss://`일 때 TLS를 활성화하므로 공급자의 `valkeys://` URI를 그대로 쓰지 않고 지원하는 TLS 연결 형식으로 구성해야 한다. |
+| Render Key Value 무료 | [외부 TLS 연결·IP 허용 목록·noeviction 선택 지원](https://render.com/docs/key-value). [무료는 재시작 시 데이터 소실](https://render.com/docs/free). | 테스트용 후보. KoDeploy 송신 IP/연결 가능 여부 확인 필요. 운영은 persistence 지원 유료 플랜을 별도 검토. |
+
+공통 이전 조건: 메모리 정책 `noeviction`, TLS 검증 유지, 필요한 송신 IP만 허용, 세 큐의 Lua/blocking 명령 확인, 동일 MySQL 유지, 기존 worker 종료 후 새 연결로 기동, 대기 작업 및 오류 재시도 검증. 새 서비스에도 메모리·처리량·연결·네트워크 제한은 존재한다. 무료 서비스 유지를 위해 의미 없는 주기 요청을 추가하는 방식으로 이번 절전 개선을 되돌리지 않는다.
+
 ## 새 오류 기록 양식
 
 ```markdown

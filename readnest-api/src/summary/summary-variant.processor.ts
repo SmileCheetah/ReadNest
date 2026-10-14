@@ -24,10 +24,10 @@ export class SummaryVariantProcessor extends QuotaAwareWorkerHost {
     private readonly aiSummaryService: AiSummaryService,
     queueSafety: QueueSafetyService,
   ) {
-    super(queueSafety);
+    super(queueSafety, SUMMARY_VARIANT_QUEUE);
   }
 
-  async process(job: Job<SummaryVariantJobData>) {
+  protected async processJob(job: Job<SummaryVariantJobData>) {
     const claimed = await this.jobs.claim(job.data);
     if (!claimed) return;
     const { article, variant, task, lease } = claimed;

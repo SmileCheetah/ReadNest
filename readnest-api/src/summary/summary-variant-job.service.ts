@@ -115,7 +115,7 @@ export class SummaryVariantJobService implements OnModuleInit, OnModuleDestroy {
         let pending = this.pendingEnqueue.get(task.id);
         if (!pending) {
           pending = this.queueSafety
-            .enqueue(() =>
+            .enqueue(SUMMARY_VARIANT_QUEUE, () =>
               this.queue.add(
                 SUMMARY_VARIANT_JOB,
                 {

@@ -17,9 +17,9 @@ export class ClassificationProcessor extends QuotaAwareWorkerHost {
     private readonly classification: ClassificationService,
     queueSafety: QueueSafetyService,
   ) {
-    super(queueSafety);
+    super(queueSafety, CLASSIFICATION_QUEUE);
   }
-  async process(job: Job<ClassificationJob>) {
+  protected async processJob(job: Job<ClassificationJob>) {
     await this.classification.process(job.data);
   }
 }

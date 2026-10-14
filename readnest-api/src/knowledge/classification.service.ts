@@ -5,6 +5,8 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
@@ -30,10 +32,15 @@ export type ClassificationJob = {
   sourceGeneration: number;
 };
 @Injectable()
-export class ClassificationService {
+export class ClassificationService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ClassificationService.name);
   private readonly client: OpenAI | null;
   private readonly model: string;
+  private timer?: ReturnType<typeof setInterval>;
+  private dispatching = false;
+  private stopping = false;
+  private backfillCursor?: string;
+  private readonly pendingEnqueue = new Map<string, Promise<unknown>>();
   constructor(
     private readonly prisma: PrismaService,
     config: ConfigService,
@@ -49,14 +56,136 @@ export class ClassificationService {
     this.model = config.get<string>('OPENAI_MODEL')?.trim() || 'gpt-6-luna';
   }
 
+  onModuleInit(): void {
+    this.timer = setInterval(() => void this.dispatch(), 5000);
+    this.timer.unref();
+    void this.dispatch();
+  }
+
+  onModuleDestroy(): void {
+    this.stopping = true;
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  private async reclaimInterrupted(userId?: string): Promise<void> {
+    const expiredBefore = new Date(Date.now() - 5 * 60_000);
+    const expired = await this.prisma.articleClassification.findMany({
+      where: {
+        ...(userId ? { article: { userId } } : {}),
+        userEdited: false,
+        state: 'RUNNING',
+        updatedAt: { lt: expiredBefore },
+      },
+      orderBy: [{ updatedAt: 'asc' }, { articleId: 'asc' }],
+      take: 50,
+    });
+    for (const task of expired) {
+      if (this.stopping || this.queueSafety.isQuotaBlocked) return;
+      // A late scan cannot reclaim a newer worker's lease or a manual edit.
+      await this.prisma.articleClassification.updateMany({
+        where: {
+          articleId: task.articleId,
+          sourceGeneration: task.sourceGeneration,
+          revision: task.revision,
+          leaseToken: task.leaseToken,
+          userEdited: false,
+          state: 'RUNNING',
+          updatedAt: { lt: expiredBefore },
+        },
+        data: {
+          state: 'PENDING',
+          leaseToken: null,
+          revision: { increment: 1 },
+        },
+      });
+    }
+  }
+
+  /** DB rows are the durable demand source; an empty scan never contacts Redis.
+   * Include missing rows because summary completion may have happened while
+   * Redis was quota-blocked, before schedule() could create a classification.
+   */
+  async dispatch(): Promise<void> {
+    if (this.dispatching || this.stopping || this.queueSafety.isQuotaBlocked)
+      return;
+    this.dispatching = true;
+    try {
+      await this.reclaimInterrupted();
+      if (this.stopping || this.queueSafety.isQuotaBlocked) return;
+      const pending = await this.prisma.articleClassification.findMany({
+        where: {
+          state: 'PENDING',
+          userEdited: false,
+          // An older classification can remain PENDING after its article's
+          // re-summary fails. Such rows must not occupy every dispatch slot.
+          article: {
+            processStatus: { in: ['SUMMARY_DONE', 'CONTEXT_INSUFFICIENT'] },
+            resultGeneration: { not: null },
+            AND: [{ rawText: { not: null } }, { rawText: { not: '' } }],
+          },
+        },
+        orderBy: [{ updatedAt: 'asc' }, { articleId: 'asc' }],
+        take: 50,
+        select: { articleId: true },
+      });
+      const scheduled = new Set<string>();
+      for (const row of pending) {
+        if (this.stopping || this.queueSafety.isQuotaBlocked) return;
+        scheduled.add(row.articleId);
+        await this.schedule(row.articleId);
+      }
+      if (this.stopping || this.queueSafety.isQuotaBlocked) return;
+      // A primary-key page bounds rows examined, not merely rows returned after
+      // a full-library LEFT JOIN/filter. Do not load article bodies just to poll.
+      const page = await this.prisma.savedArticle.findMany({
+        where: this.backfillCursor ? { id: { gt: this.backfillCursor } } : {},
+        orderBy: { id: 'asc' },
+        take: 50,
+        select: {
+          id: true,
+          resultGeneration: true,
+          processStatus: true,
+          classification: {
+            select: {
+              userEdited: true,
+              state: true,
+              sourceGeneration: true,
+            },
+          },
+        },
+      });
+      this.backfillCursor = page.length === 50 ? page[49].id : undefined;
+      for (const article of page) {
+        if (this.stopping || this.queueSafety.isQuotaBlocked) return;
+        if (
+          scheduled.has(article.id) ||
+          article.resultGeneration === null ||
+          !['SUMMARY_DONE', 'CONTEXT_INSUFFICIENT'].includes(
+            article.processStatus,
+          ) ||
+          article.classification?.userEdited ||
+          article.classification?.sourceGeneration === article.resultGeneration
+        )
+          continue;
+        await this.schedule(article.id);
+      }
+    } catch {
+      this.logger.warn(
+        'Classification dispatch unavailable; durable demand remains in the database.',
+      );
+    } finally {
+      this.dispatching = false;
+    }
+  }
+
   async schedule(articleId: string, retry = false) {
-    if (this.queueSafety.isQuotaBlocked) return false;
+    if (this.stopping || this.queueSafety.isQuotaBlocked) return false;
     const article = await this.prisma.savedArticle.findUnique({
       where: { id: articleId },
       include: { classification: true },
     });
     if (
-      !article?.rawText ||
+      !article?.rawText?.trim() ||
       article.resultGeneration === null ||
       !['SUMMARY_DONE', 'CONTEXT_INSUFFICIENT'].includes(article.processStatus)
     )
@@ -109,6 +238,8 @@ export class ClassificationService {
       where: { articleId },
     });
     if (
+      this.stopping ||
+      this.queueSafety.isQuotaBlocked ||
       !scan ||
       scan.userEdited ||
       scan.state !== 'PENDING' ||
@@ -116,22 +247,38 @@ export class ClassificationService {
     )
       return false;
     try {
-      await this.queueSafety.enqueue(() =>
-        this.queue.add(
-          'classify',
-          {
-            articleId,
-            sourceGeneration: scan.sourceGeneration,
-            revision: scan.revision,
-          },
-          {
-            jobId: `${articleId}-${scan.revision}`,
-            attempts: 1,
-            removeOnComplete: true,
-            removeOnFail: true,
-          },
-        ),
-      );
+      const jobId = `${articleId}-${scan.revision}`;
+      let pending = this.pendingEnqueue.get(jobId);
+      if (!pending) {
+        pending = this.queueSafety
+          .enqueue(CLASSIFICATION_QUEUE, () =>
+            this.queue.add(
+              'classify',
+              {
+                articleId,
+                sourceGeneration: scan.sourceGeneration,
+                revision: scan.revision,
+              },
+              {
+                jobId,
+                attempts: 1,
+                removeOnComplete: true,
+                removeOnFail: true,
+              },
+            ),
+          )
+          .finally(() => this.pendingEnqueue.delete(jobId));
+        this.pendingEnqueue.set(jobId, pending);
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        pending,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('QUEUE_TIMEOUT')), 3000);
+        }),
+      ]).finally(() => {
+        if (timer) clearTimeout(timer);
+      });
     } catch (error) {
       // Optional classification can be picked up by scan after recovery.
       if (this.queueSafety.isQuotaBlocked) return false;
@@ -141,15 +288,7 @@ export class ClassificationService {
   }
 
   async scan(userId: string) {
-    await this.prisma.articleClassification.updateMany({
-      where: {
-        article: { userId },
-        userEdited: false,
-        state: 'RUNNING',
-        updatedAt: { lt: new Date(Date.now() - 5 * 60_000) },
-      },
-      data: { state: 'PENDING', leaseToken: null, revision: { increment: 1 } },
-    });
+    await this.reclaimInterrupted(userId);
     // Bounded backfill, including missed dispatches after a new summary generation.
     const rows = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT a.id FROM saved_articles a LEFT JOIN article_classifications c ON c.articleId = a.id

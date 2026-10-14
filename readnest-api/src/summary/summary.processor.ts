@@ -35,10 +35,10 @@ export class SummaryProcessor extends QuotaAwareWorkerHost {
     private readonly classification: ClassificationService,
     queueSafety: QueueSafetyService,
   ) {
-    super(queueSafety);
+    super(queueSafety, SUMMARY_QUEUE);
   }
 
-  async process(job: Job<SummaryJobData>) {
+  protected async processJob(job: Job<SummaryJobData>) {
     const claimed = await this.jobs.claim(job.data);
     if (!claimed) return;
     const { article, task, lease } = claimed;
