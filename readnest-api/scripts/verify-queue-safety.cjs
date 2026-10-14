@@ -3,7 +3,9 @@
  * Opt-in, local-only BullMQ demand/safety integration:
  *   node scripts/verify-queue-safety.cjs
  *   node scripts/verify-queue-safety.cjs --functional-only
- * Requires redis-server on PATH (or REDIS_SERVER_BINARY). No .env, production
+ *   node scripts/verify-queue-safety.cjs --auth-limit-only
+ * Normal/functional mode requires redis-server on PATH (or REDIS_SERVER_BINARY).
+ * AUTH-only mode uses a loopback RESP fixture and dummy credentials. No .env, production
  * application, database, AI API or existing Redis instance is loaded/contacted.
  * INFO counts include Lua internals and are NOT Upstash billable requests.
  * Full mode observes both startup and post-work idle for 125 seconds each.
@@ -36,6 +38,8 @@ const observedClose = (worker) =>
 const ownedWorkers = [];
 const ownedQueues = [];
 const ownedSafeties = [];
+const ownedTcpServers = [];
+const ownedTcpSockets = new Set();
 const functionalOnly = process.argv.includes('--functional-only');
 let redisProcess;
 let inspector;
@@ -558,8 +562,14 @@ async function verifyQuota(connection, { safety, items, hold }) {
   hold.resolve();
 
   const fresh = makeSafety();
-  await Promise.all(items.map(({ queue }) => queue.resume()));
-  const workers = items.map(({ queue }) => {
+  const recoveryQueues = items.map(({ queue }) => {
+    const recoveredQueue = new Queue(queue.name, { connection });
+    ownedQueues.push(recoveredQueue);
+    fresh.watchQueue(recoveredQueue);
+    return recoveredQueue;
+  });
+  await Promise.all(recoveryQueues.map((queue) => queue.resume()));
+  const workers = recoveryQueues.map((queue) => {
     const worker = new Worker(
       queue.name,
       () => fresh.withProcessing(queue.name, async () => {}),
@@ -591,7 +601,353 @@ async function verifyQuota(connection, { safety, items, hold }) {
   );
   fresh.onModuleDestroy();
   await Promise.all(workers.map((worker) => worker.close(true)));
-  await Promise.all(items.map(({ queue }) => queue.close()));
+  await Promise.all(recoveryQueues.map((queue) => queue.close()));
+}
+
+// Small RESP request decoder for the isolated AUTH rejection fixture only.
+// No command arguments are logged or included in assertion messages.
+function decodeRespRequest(buffer) {
+  const lineEnd = buffer.indexOf('\r\n');
+  if (lineEnd < 0) return undefined;
+  if (buffer[0] !== 42) throw new Error('Invalid local test RESP request');
+  const count = Number(buffer.subarray(1, lineEnd).toString());
+  let offset = lineEnd + 2;
+  let command;
+  for (let index = 0; index < count; index += 1) {
+    const lengthEnd = buffer.indexOf('\r\n', offset);
+    if (lengthEnd < 0) return undefined;
+    if (buffer[offset] !== 36) throw new Error('Invalid local test RESP item');
+    const length = Number(buffer.subarray(offset + 1, lengthEnd).toString());
+    const valueStart = lengthEnd + 2;
+    const valueEnd = valueStart + length;
+    if (buffer.length < valueEnd + 2) return undefined;
+    if (index === 0)
+      command = buffer.subarray(valueStart, valueEnd).toString().toUpperCase();
+    offset = valueEnd + 2;
+  }
+  return { command, bytes: offset };
+}
+
+async function verifyAuthPlanLimit(firstFailure = 'producer') {
+  const providerMessage =
+    firstFailure === 'wrongpass'
+      ? 'WRONGPASS invalid username-password pair or user is disabled.'
+      : 'ERR This database has reached current Fixed plan limits. Please upgrade manually or enable auto upgrade on Upstash Console';
+  const dummyPassword = 'LOCAL_FIXTURE_CREDENTIAL_NOT_A_REAL_PASSWORD';
+  const safety = makeSafety();
+  const stderrChunks = [];
+  const unhandledErrors = [];
+  const captureUnhandled = (error) => {
+    unhandledErrors.push({ error, stage });
+  };
+  const originalStderrWrite = process.stderr.write;
+  let connections = 0;
+  let authRequests = 0;
+  let workerAuthErrors = 0;
+  let wrongPassErrors = 0;
+  const initialAuthSockets = [];
+  let stage = 'initializing loopback fixture';
+  let module;
+  let outcome;
+  const server = net.createServer((socket) => {
+    connections += 1;
+    ownedTcpSockets.add(socket);
+    socket.once('close', () => ownedTcpSockets.delete(socket));
+    socket.on('error', () => {});
+    let buffer = Buffer.alloc(0);
+    let authPending = false;
+    socket.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      try {
+        for (;;) {
+          const request = decodeRespRequest(buffer);
+          if (!request) break;
+          buffer = buffer.subarray(request.bytes);
+          if (request.command === 'AUTH') {
+            authPending = true;
+            authRequests += 1;
+            initialAuthSockets.push(socket);
+            // Three producers are constructed before six worker connections.
+            // Hold replies until all nine AUTHs arrive, then fail either a
+            // producer or a worker first to exercise both initialization races.
+            if (initialAuthSockets.length === 9) {
+              initialAuthSockets[firstFailure === 'worker' ? 3 : 0].write(
+                `-${providerMessage}\r\n`,
+              );
+            }
+          } else if (authPending) {
+            // RESP replies are ordered. Do not reply to pipelined CLIENT/INFO
+            // commands while this socket's AUTH reply is deliberately held.
+            continue;
+          } else if (request.command === 'INFO') {
+            const info =
+              'redis_version:7.2.0\r\nmaxmemory_policy:noeviction\r\n';
+            socket.write(`$${Buffer.byteLength(info)}\r\n${info}\r\n`);
+          } else socket.write('+OK\r\n');
+        }
+      } catch {
+        socket.destroy();
+      }
+    });
+  });
+  ownedTcpServers.push(server);
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const connection = {
+    host: '127.0.0.1',
+    port: server.address().port,
+    password: dummyPassword,
+    maxRetriesPerRequest: null,
+    retryStrategy: () => 100,
+  };
+  // BullMQ may log a raw ReplyError object during connection initialization.
+  // Capture stderr so test failures never expose the dummy AUTH argument either.
+  process.stderr.write = function captureStderr(chunk, encoding, callback) {
+    stderrChunks.push(
+      Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk),
+    );
+    const done = typeof encoding === 'function' ? encoding : callback;
+    if (typeof done === 'function') done();
+    return true;
+  };
+  process.on('unhandledRejection', captureUnhandled);
+  process.on('uncaughtException', captureUnhandled);
+  try {
+    stage = 'compiling real Nest queues';
+    const names = ['auth-summary', 'auth-variant', 'auth-classification'];
+    const processors = names.map((name) => {
+      class AuthProcessor extends QuotaAwareWorkerHost {
+        onApplicationBootstrap() {
+          this.worker.on('error', (error) => {
+            if (/fixed plan limits/i.test(error.message)) workerAuthErrors += 1;
+          });
+          super.onApplicationBootstrap();
+        }
+        async processJob() {
+          throw new Error('AUTH fixture must never process jobs');
+        }
+      }
+      Processor(name, QUEUE_WORKER_OPTIONS)(AuthProcessor);
+      return {
+        type: AuthProcessor,
+        instance: new AuthProcessor(safety, name),
+        name,
+      };
+    });
+    module = await Test.createTestingModule({
+      imports: [
+        BullModule.forRoot({ connection }),
+        BullModule.registerQueue(...names.map((name) => ({ name }))),
+      ],
+      providers: [
+        { provide: QueueSafetyService, useValue: safety },
+        ...processors.map(({ type, instance }) => ({
+          provide: type,
+          useValue: instance,
+        })),
+        ...names.map((name) => ({
+          provide: `watch-${name}`,
+          useFactory: (queue) => {
+            safety.watchQueue(queue);
+            queue.on('error', (error) => {
+              if (error.message.startsWith('WRONGPASS')) wrongPassErrors += 1;
+            });
+            return {};
+          },
+          inject: [getQueueToken(name)],
+        })),
+      ],
+    }).compile();
+    stage = 'bootstrapping real Nest workers';
+    await bounded(module.init(), 'AUTH fixture Nest bootstrap');
+    const queues = names.map((name) => module.get(getQueueToken(name)));
+    const workers = processors.map(({ instance }) => instance.worker);
+    if (firstFailure === 'wrongpass') {
+      stage = 'ordinary WRONGPASS event forwarding';
+      await until(
+        () => wrongPassErrors > 0,
+        'Ordinary authentication error remains observable',
+        5_000,
+      );
+      assert.equal(
+        safety.isQuotaBlocked,
+        false,
+        'WRONGPASS must not set quota latch',
+      );
+      assert.ok(
+        queues.every((queue) => !queue.closed),
+        'WRONGPASS must not permanently close producers',
+      );
+      assert.ok(
+        workers.every((worker) => !worker.closed),
+        'WRONGPASS must not permanently close workers',
+      );
+      outcome = {
+        phase: 'ordinary-auth-error',
+        forwarded: true,
+        quotaBlocked: false,
+        producersPermanentlyClosed: false,
+        workersPermanentlyClosed: false,
+      };
+    } else {
+      stage = 'waiting for quota latch and producer/worker closure';
+      await until(
+        () => safety.isQuotaBlocked,
+        'AUTH limit sets quota latch',
+        5_000,
+      );
+      await until(
+        () =>
+          queues.every((queue) => queue.closed) &&
+          workers.every((worker) => worker.closed),
+        'AUTH limit closes all producer and worker clients',
+        5_000,
+      );
+      await until(
+        () => ownedTcpSockets.size === 0,
+        'AUTH fixture connections close',
+        5_000,
+      );
+      assert.ok(
+        authRequests >= 9,
+        'Fixture must receive all actual AUTH requests',
+      );
+      assert.equal(
+        workerAuthErrors > 0,
+        firstFailure === 'worker',
+        'Fixture must fail the intended connection class first',
+      );
+      const before = { connections, authRequests };
+      await sleep(1_500);
+      assert.deepEqual(
+        { connections, authRequests },
+        before,
+        'No reconnect/AUTH retries after quota latch',
+      );
+
+      stage = 'late queue and worker registration';
+      const lateQueue = new Queue('auth-late', { connection });
+      ownedQueues.push(lateQueue);
+      safety.watchQueue(lateQueue);
+      const lateWorker = new Worker('auth-late', async () => {}, {
+        connection,
+        ...QUEUE_WORKER_OPTIONS,
+      });
+      ownedWorkers.push(lateWorker);
+      lateWorker.on('error', (error) => safety.reportError(error));
+      safety.startWorker(lateWorker);
+      await until(
+        () => lateQueue.closed && lateWorker.closed,
+        'Late registration is closed by existing latch',
+        5_000,
+      );
+      await until(
+        () => ownedTcpSockets.size === 0,
+        'Late registration leaves no connections',
+        5_000,
+      );
+      let enqueueCalls = 0;
+      await assert.rejects(
+        safety.enqueue('auth-late', async () => {
+          enqueueCalls += 1;
+        }),
+        /REDIS_QUOTA_BLOCKED/,
+      );
+      safety.wakeWorker('auth-late');
+      const afterLate = { connections, authRequests };
+      await sleep(1_500);
+      assert.deepEqual(
+        { connections, authRequests },
+        afterLate,
+        'Late clients must not reconnect',
+      );
+      assert.equal(enqueueCalls, 0, 'Blocked enqueue must not reach Redis');
+      const capturedStderr = stderrChunks.join('');
+      assert.equal(
+        unhandledErrors.length,
+        0,
+        'AUTH failure caused an unhandled asynchronous error',
+      );
+      assert.ok(
+        !capturedStderr.includes(dummyPassword),
+        'AUTH argument leaked to stderr',
+      );
+      assert.ok(
+        !capturedStderr.includes(providerMessage),
+        'Raw provider error leaked to stderr',
+      );
+      assert.ok(
+        !/command:\s*\{|args:\s*\[/.test(capturedStderr),
+        'Redis command object leaked to stderr',
+      );
+      outcome = {
+        phase: 'auth-plan-limit',
+        firstFailure,
+        realNestQueuesClosed: queues.length,
+        realNestWorkersClosed: workers.length,
+        authRequests,
+        reconnectsAfterLatch: 0,
+        lateRegistrationClosed: true,
+        blockedEnqueueCalls: 0,
+        sensitiveStderrOutput: false,
+        quietObservationMs: 3_000,
+      };
+    }
+  } catch (error) {
+    if (unhandledErrors.length)
+      console.log(
+        JSON.stringify({
+          phase: 'auth-fixture-unhandled-diagnostics',
+          failures: unhandledErrors.map(
+            ({ error: reason, stage: failedStage }) => ({
+              stage: failedStage,
+              errorType: reason?.name,
+              providerLimit: /fixed plan limits/i.test(reason?.message || ''),
+            }),
+          ),
+        }),
+      );
+    const safeAssertion =
+      error?.code === 'ERR_ASSERTION' || error?.message?.endsWith(': timed out')
+        ? error.message.split('\n')[0]
+        : 'operation failed';
+    throw new Error(
+      `AUTH ${firstFailure} fixture failed during ${stage}: ${safeAssertion}; connections=${connections}, authRequests=${authRequests}, quotaBlocked=${safety.isQuotaBlocked}, unhandledErrors=${unhandledErrors.length}; raw errors and command arguments withheld`,
+    );
+  } finally {
+    safety.onModuleDestroy();
+    if (module)
+      await bounded(module.close(), 'AUTH fixture module cleanup').catch(
+        () => {},
+      );
+    for (const socket of ownedTcpSockets) socket.destroy();
+    await new Promise((resolve) => server.close(resolve));
+    await sleep(50);
+    process.off('unhandledRejection', captureUnhandled);
+    process.off('uncaughtException', captureUnhandled);
+    process.stderr.write = originalStderrWrite;
+  }
+  assert.equal(
+    unhandledErrors.length,
+    0,
+    'AUTH fixture must have no unhandled errors, including during cleanup',
+  );
+  const completeStderr = stderrChunks.join('');
+  assert.ok(
+    !completeStderr.includes(dummyPassword),
+    'AUTH argument leaked during cleanup',
+  );
+  assert.ok(
+    !completeStderr.includes(providerMessage),
+    'Raw provider error leaked during cleanup',
+  );
+  assert.ok(
+    !/command:\s*\{|args:\s*\[/.test(completeStderr),
+    'Redis command arguments leaked during cleanup',
+  );
+  console.log(JSON.stringify(outcome));
 }
 
 async function verifyNestLifecycle(connection) {
@@ -661,6 +1017,15 @@ async function verifyNestLifecycle(connection) {
 }
 
 async function run() {
+  if (process.argv.includes('--auth-limit-only')) {
+    await verifyAuthPlanLimit();
+    await verifyAuthPlanLimit('worker');
+    await verifyAuthPlanLimit('wrongpass');
+    console.log(
+      '[queue-safety] PASS AUTH plan-limit fixture. Loopback TCP and dummy credentials only; no .env or external Redis contacted.',
+    );
+    return;
+  }
   const connection = await startIsolatedRedis();
   inspector = new Redis({ ...connection, maxRetriesPerRequest: 1 });
   await bounded(inspector.ping(), 'Inspector readiness');
@@ -671,6 +1036,9 @@ async function run() {
   await verifyStaleActiveRecovery(connection);
   await verifyQuota(connection, demand);
   await verifyNestLifecycle(connection);
+  await verifyAuthPlanLimit();
+  await verifyAuthPlanLimit('worker');
+  await verifyAuthPlanLimit('wrongpass');
   console.log(
     `[queue-safety] PASS (${functionalOnly ? 'short idle observations only' : 'two independent 125-second idle observations'}). Local Redis only; no Upstash, billing, API key or application database contacted.`,
   );
@@ -682,6 +1050,12 @@ async function cleanup() {
   await Promise.allSettled(ownedQueues.map((queue) => queue.close()));
   if (testModule) await testModule.close().catch(() => {});
   if (inspector) inspector.disconnect();
+  for (const socket of ownedTcpSockets) socket.destroy();
+  await Promise.all(
+    ownedTcpServers.map(
+      (server) => new Promise((resolve) => server.close(resolve)),
+    ),
+  );
   if (redisProcess && redisProcess.exitCode === null && !redisProcess.killed) {
     const exited = once(redisProcess, 'exit');
     redisProcess.kill('SIGTERM');

@@ -16,9 +16,16 @@ type ManagedWorker = {
 };
 
 export function isRedisQuotaError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
   return (
-    error instanceof Error &&
-    /\bmax requests limit exceeded\b/i.test(error.message)
+    /\bmax requests limit exceeded\b/i.test(error.message) ||
+    // Upstash also rejects AUTH when a suspended database reaches plan limits.
+    // Require the provider's wording so ordinary authentication/network errors
+    // cannot permanently stop otherwise recoverable queues.
+    (/\bthis database has reached current fixed plan limits\b/i.test(
+      error.message,
+    ) &&
+      /\bupstash console\b/i.test(error.message))
   );
 }
 
@@ -29,6 +36,7 @@ export function isRedisQuotaError(error: unknown): boolean {
 export class QueueSafetyService implements OnModuleDestroy {
   private readonly logger = new Logger(QueueSafetyService.name);
   private readonly workers = new Map<Worker, ManagedWorker>();
+  private readonly queues = new Set<Queue>();
   private readonly demand = new Map<string, number>();
   private stopped = false;
   private shuttingDown = false;
@@ -38,7 +46,10 @@ export class QueueSafetyService implements OnModuleDestroy {
   }
 
   watchQueue(queue: Queue): void {
+    if (this.queues.has(queue)) return;
+    this.queues.add(queue);
     queue.on('error', (error) => this.reportError(error));
+    if (this.stopped || this.shuttingDown) void this.closeQueue(queue);
   }
 
   startWorker(worker: Worker): void {
@@ -189,6 +200,28 @@ export class QueueSafetyService implements OnModuleDestroy {
     for (const state of this.workers.values()) {
       clearTimeout(state.timer);
       this.closeWorker(state.worker);
+    }
+    // A suspended DB can reject AUTH before BullMQ finishes initialization.
+    // Producer connections must also close, otherwise ioredis keeps retrying
+    // even though all workers and durable dispatchers have already stopped.
+    for (const queue of this.queues) void this.closeQueue(queue);
+  }
+
+  private async closeQueue(queue: Queue): Promise<void> {
+    // Queue.close() disconnects an initializing Redis connection immediately;
+    // queue.disconnect() awaits its client and can hang when AUTH is rejected.
+    try {
+      await queue.close();
+    } catch {
+      // A ready connection can also reject QUIT after capacity is exhausted.
+      // Its initialized client permits a public force-disconnect fallback.
+      try {
+        await queue.disconnect();
+      } catch {
+        this.logger.error(
+          'Failed to close a quota-blocked queue; restart required.',
+        );
+      }
     }
   }
 

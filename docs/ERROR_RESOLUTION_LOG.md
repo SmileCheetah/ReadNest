@@ -194,6 +194,34 @@ command: evalsha
 
 공통 이전 조건: 메모리 정책 `noeviction`, TLS 검증 유지, 필요한 송신 IP만 허용, 세 큐의 Lua/blocking 명령 확인, 동일 MySQL 유지, 기존 worker 종료 후 새 연결로 기동, 대기 작업 및 오류 재시도 검증. 새 서비스에도 메모리·처리량·연결·네트워크 제한은 존재한다. 무료 서비스 유지를 위해 의미 없는 주기 요청을 추가하는 방식으로 이번 절전 개선을 되돌리지 않는다.
 
+### ERR-001 무료 플랜 운영 재평가·재배포 준비 (2026-10-15)
+
+사용자가 기존 Upstash 무료를 유지하고 수정된 코드로 KoDeploy 재배포 및 실제 테스트를 요청했다.
+
+#### 배포 전 새로 확인한 오류
+
+- 운영 `/api/health`는 HTTP 200, DB 정상이나 queue 상태 필드가 없어 최신 개선 코드가 아직 운영에 반영되지 않은 것을 확인했다. KoDeploy 최신 성공 배포는 여전히 #6(10월 9일)이었다.
+- Upstash `readnest-redis`는 Free Tier, 월 대역폭 **10GB / 10GB**, 요청 배너 **497,396 / 500,000**, 저장 **7KB**, 비용 **$0.00**로 표시됐다. 콘솔은 **monthly bandwidth limit로 SUSPENDED**라고 명시했다. 이전의 요청 한도 오류와 별도로 현재 대역폭 한도에 의해 중지된 상태가 확인됐다.
+- 운영 연결 단계에서 아래 오류가 반복됐다. 문구에 Fixed plan이 있어도 콘솔의 실제 요금제는 무료이므로 유료 전환됐다고 해석하지 않는다.
+
+```text
+ERR This database has reached current Fixed plan limits.
+Please upgrade manually or enable auto upgrade on Upstash Console
+command: auth (인증 인자는 기록하지 않음)
+```
+
+- 기존 guard는 `max requests limit exceeded`만 감지해 이 오류를 차단하지 못했다. worker 종료만으로는 producer Queue의 AUTH 재연결도 멈추지 않는다. 기존 라이브러리 오류 로그에 인증 인자가 포함될 수 있는 것을 확인했고 새 로그에는 오류 원문·인자를 출력하지 않는다.
+
+#### 해결 진행
+
+- 위 공급자 한도 오류를 명확히 구분해 차단하고 producer Queue 연결도 닫도록 보완했다. ready 연결의 종료가 거절되면 공개 `disconnect()`로 강제 종료한다. 일반 인증 실패·네트워크 장애·AI rate limit은 이 한도 차단 조건으로 취급하지 않는다.
+- 격리된 TCP 서버에서 실제 Nest/BullMQ의 AUTH 거부를 재현하자 BullMQ 5.78.1의 초기화 오류 Promise가 연결 종료 후 제거된 오류 리스너로 전달되어 unhandled rejection이 발생했다. 전역 Promise 오류를 무시하지 않고, 정확한 버전을 고정한 설치 호환 패치로 이미 닫힌 RedisConnection의 late-init 오류 전달만 생략한다. `scripts/apply-bullmq-close-patch.cjs`는 CJS/ESM 원문을 검증하고 설치 시 재현 가능하게 적용하며, 버전 변경 시 검토 없이 설치가 진행되지 않게 한다.
+- 보완 코드 검증 후 기존 무료 연결을 유지해 main으로 배포한다. 현재 한도가 복구되지 않으면 성공 요약 및 정상 유휴 사용량 평가는 완료할 수 없으므로, 실제 차단 동작과 HTTP/DB 상태 검증을 성공 요약 테스트와 구분해 기록한다.
+- 보완 후 build·자동 테스트 **21 suites / 225 tests** 통과, ESLint 오류 0건/기존 경고 1건이다. 격리 TCP/Nest 테스트에서 producer 먼저/worker 먼저 AUTH 한도 거부 두 순서를 검증했다. 각 9개 초기 AUTH 연결 이후 큐 3개와 worker 3개가 종료되고 3초간 재연결 0회, 늦은 등록 종료, 추가 enqueue 차단, unhandled rejection 0건을 확인했다. 일반 WRONGPASS 오류는 live 리스너에 전달되며 영구 한도 차단을 일으키지 않았다.
+- 별도 임시 디렉터리에서 `.env` 없이 `npm ci` 및 Dockerfile과 같은 `npm prune --omit=dev`를 실행해 설치 패치의 재현성과 반복 적용을 확인했다. 기존 패키지의 로컬 Node 20 엔진 경고는 남아 있고 운영 Dockerfile은 Node 22를 사용한다. DB 연결·migration·AI 호출 없이 설치만 검증했다.
+- 기존 functional 통합 시나리오도 종료 코드 0으로 통과했다. 짧은 유휴 관측에서 명령 0회, 재개 6/1/1ms, pause 경쟁 조건·prefetch 잠금 갱신/동시성 2 유지·18,392ms orphan 회수·한도 차단 후 16,002ms 명령 0회·대기 작업 3개 복구·Nest 초기화를 검증했다. 이번 보완 후 125초 관측을 반복한 결과는 아니며, 기존 긴 관측 기록과 구분한다. 격리 Redis/TCP 프로세스는 모두 정리했다.
+- 상태: **배포 준비 / 무료 한도 미복구**. 유료 전환·기존 DB 삭제·신규 DB 생성은 하지 않았다.
+
 ## 새 오류 기록 양식
 
 ```markdown

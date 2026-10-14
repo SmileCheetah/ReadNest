@@ -38,6 +38,7 @@ describe.each(['summary', 'variant'] as const)(
         name: queueName,
         add: jest.fn().mockResolvedValue({}),
         on: jest.fn(),
+        close: jest.fn().mockResolvedValue(undefined),
       };
       const safety = new QueueSafetyService();
       const service =

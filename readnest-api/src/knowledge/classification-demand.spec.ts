@@ -37,7 +37,11 @@ function setup() {
     },
     $queryRaw: jest.fn().mockResolvedValue([]),
   };
-  const queue = { add: jest.fn().mockResolvedValue({}), on: jest.fn() };
+  const queue = {
+    add: jest.fn().mockResolvedValue({}),
+    on: jest.fn(),
+    close: jest.fn().mockResolvedValue(undefined),
+  };
   const safety = new QueueSafetyService();
   const service = new ClassificationService(
     prisma as never,

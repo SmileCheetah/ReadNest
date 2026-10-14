@@ -13,6 +13,10 @@ import {
 
 const quotaError = () =>
   new Error('ERR max requests limit exceeded. Limit: 500000, Usage: 500004');
+const fixedPlanError = () =>
+  new Error(
+    'ERR This database has reached current Fixed plan limits. Please upgrade manually or enable auto upgrade on Upstash Console',
+  );
 
 class FakeWorker extends EventEmitter {
   running = false;
@@ -42,6 +46,17 @@ class FakeWorker extends EventEmitter {
 
   asWorker(): Worker {
     return this as unknown as Worker;
+  }
+}
+
+class FakeQueue extends EventEmitter {
+  readonly close = jest.fn<Promise<void>, []>().mockResolvedValue(undefined);
+  readonly disconnect = jest
+    .fn<Promise<void>, []>()
+    .mockResolvedValue(undefined);
+
+  asQueue(): Queue {
+    return this as unknown as Queue;
   }
 }
 
@@ -98,10 +113,19 @@ describe('Redis quota safety', () => {
     expect(
       isRedisQuotaError(new Error('ERR MAX REQUESTS LIMIT EXCEEDED.')),
     ).toBe(true);
+    expect(isRedisQuotaError(fixedPlanError())).toBe(true);
+    expect(
+      isRedisQuotaError(new Error(fixedPlanError().message.toUpperCase())),
+    ).toBe(true);
     for (const error of [
       new Error('ECONNREFUSED'),
+      new Error('ECONNRESET'),
+      new Error('WRONGPASS invalid username-password pair'),
+      new Error('ERR AUTH failed'),
       new Error('QUEUE_TIMEOUT'),
       new Error('429 AI rate limit exceeded'),
+      new Error('AI provider has reached current Fixed plan limits'),
+      new Error('ERR This database has reached current Fixed plan limits'),
       new Error('max memory limit exceeded'),
       { message: 'ERR max requests limit exceeded' },
       null,
@@ -201,13 +225,128 @@ describe('Redis quota safety', () => {
 
   it('observes producer queue error events without requiring a worker to run', () => {
     const safety = new QueueSafetyService();
-    const queue = new EventEmitter();
-    safety.watchQueue(queue as unknown as Queue);
+    const queue = new FakeQueue();
+    safety.watchQueue(queue.asQueue());
 
     queue.emit('error', quotaError());
 
     expect(safety.isQuotaBlocked).toBe(true);
     expect(errorLog).toHaveBeenCalledTimes(1);
+    expect(queue.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes all workers and blocks dispatch when Upstash rejects AUTH for plan exhaustion', async () => {
+    const safety = new QueueSafetyService();
+    const workers = ['summary', 'variant', 'classification'].map((name) =>
+      makeHost(safety, name),
+    );
+    for (const { host } of workers) host.onApplicationBootstrap();
+    const queues = Array.from({ length: 3 }, () => new FakeQueue());
+    for (const queue of queues) safety.watchQueue(queue.asQueue());
+    const blockedOperation = jest.fn(() => Promise.resolve('must-not-enqueue'));
+
+    queues[0].emit('error', fixedPlanError());
+    queues[1].emit('error', fixedPlanError());
+    safety.wakeWorker('summary');
+    await expect(safety.enqueue('summary', blockedOperation)).rejects.toThrow(
+      'REDIS_QUOTA_BLOCKED',
+    );
+    await jest.advanceTimersByTimeAsync(WORKER_IDLE_MS * 2);
+
+    expect(safety.isQuotaBlocked).toBe(true);
+    expect(blockedOperation).not.toHaveBeenCalled();
+    for (const { worker } of workers) {
+      expect(worker.close).toHaveBeenCalledTimes(1);
+      expect(worker.close).toHaveBeenCalledWith(true);
+      expect(worker.run).not.toHaveBeenCalled();
+    }
+    for (const queue of queues) {
+      expect(queue.close).toHaveBeenCalledTimes(1);
+    }
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    expect(warningLog).not.toHaveBeenCalled();
+    expect(errorLog.mock.calls.flat().join(' ')).not.toContain(
+      fixedPlanError().message,
+    );
+  });
+
+  it('closes a producer registered after quota failure only once', () => {
+    const safety = new QueueSafetyService();
+    safety.reportError(fixedPlanError());
+    const queue = new FakeQueue();
+
+    safety.watchQueue(queue.asQueue());
+    safety.watchQueue(queue.asQueue());
+
+    expect(queue.close).toHaveBeenCalledTimes(1);
+    expect(queue.listenerCount('error')).toBe(1);
+  });
+
+  it('keeps producer connections open after ordinary AUTH and connection errors', () => {
+    const safety = new QueueSafetyService();
+    const queue = new FakeQueue();
+    safety.watchQueue(queue.asQueue());
+
+    queue.emit('error', new Error('WRONGPASS invalid username-password pair'));
+    queue.emit('error', new Error('ECONNRESET'));
+
+    expect(safety.isQuotaBlocked).toBe(false);
+    expect(queue.close).not.toHaveBeenCalled();
+    expect(warningLog).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['reject', 'throw'] as const)(
+    'force-disconnects after producer close %s without leaking its payload or skipping other queues',
+    async (failure) => {
+      const safety = new QueueSafetyService();
+      const queues = [new FakeQueue(), new FakeQueue()];
+      const error = new Error('private-connection-details');
+      if (failure === 'reject') {
+        queues[0].close.mockRejectedValue(error);
+      } else {
+        queues[0].close.mockImplementation(() => {
+          throw error;
+        });
+      }
+      for (const queue of queues) safety.watchQueue(queue.asQueue());
+
+      queues[0].emit('error', fixedPlanError());
+      await flushAsyncHandlers();
+
+      for (const queue of queues) {
+        expect(queue.close).toHaveBeenCalledTimes(1);
+      }
+      expect(queues[0].disconnect).toHaveBeenCalledTimes(1);
+      expect(queues[1].disconnect).not.toHaveBeenCalled();
+      expect(errorLog).toHaveBeenCalledTimes(1);
+      expect(errorLog.mock.calls.flat().join(' ')).not.toContain(
+        'private-connection-details',
+      );
+    },
+  );
+
+  it('logs sanitized failure if producer close and force-disconnect both fail', async () => {
+    const safety = new QueueSafetyService();
+    const queues = [new FakeQueue(), new FakeQueue()];
+    queues[0].close.mockRejectedValue(new Error('private-close-details'));
+    queues[0].disconnect.mockRejectedValue(
+      new Error('private-disconnect-details'),
+    );
+    for (const queue of queues) safety.watchQueue(queue.asQueue());
+
+    queues[0].emit('error', fixedPlanError());
+    await flushAsyncHandlers();
+
+    for (const queue of queues) {
+      expect(queue.close).toHaveBeenCalledTimes(1);
+    }
+    expect(queues[0].disconnect).toHaveBeenCalledTimes(1);
+    expect(errorLog).toHaveBeenCalledWith(
+      'Failed to close a quota-blocked queue; restart required.',
+    );
+    const logs = errorLog.mock.calls.flat().join(' ');
+    expect(logs).not.toContain('private-close-details');
+    expect(logs).not.toContain('private-disconnect-details');
   });
 
   it('rethrows the original enqueue quota error and blocks later operations locally', async () => {
